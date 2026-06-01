@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  # API Gateway (Nginx)
+  nginx:
+    image: nginx:alpine
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "80:80"
+    depends_on:
+      - auth-service
+      - games-service
+
+  # База даних для користувачів
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: casino_admin
+      POSTGRES_PASSWORD: casino_password
+      POSTGRES_DB: casino_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  # Redis для збереження кешу та WebSocket-сесій
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  # Мікросервіс авторизації
+  auth-service:
+    build: ./auth-service
+    environment:
+      - PORT=5001
+      - DATABASE_URL=postgresql://casino_admin:casino_password@postgres:5432/casino_db
+      - JWT_SECRET=supersecretjwtkey
+    ports:
+      - "5001:5001"
+
+  # Мікросервіс одиночних ігор (Dice, Mines, Plinko)
+  games-service:
+    build: ./games-service
+    environment:
+      - PORT=5002
+      - AUTH_SERVICE_URL=http://auth-service:5001
+    ports:
+      - "5002:5002"
+
+volumes:
+  pgdata:
