@@ -9,6 +9,7 @@ import battlesRouter from './routes/battles.js';
 import itemsRouter from './routes/items.js';
 import auctionRouter from './routes/auction.js';
 import clickerRouter from './routes/clicker.js';
+import dropsRouter from './routes/drops.js';
 
 const app = express();
 app.use(express.json());
@@ -22,6 +23,7 @@ app.use('/api/v1/battles', battlesRouter);
 app.use('/api/v1/items', itemsRouter);
 app.use('/api/v1/auction', auctionRouter);
 app.use('/api/v1/clicker', clickerRouter);
+app.use('/api/v1/drops', dropsRouter);
 
 const PORT = process.env.PORT || 5002;
 

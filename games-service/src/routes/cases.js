@@ -2,6 +2,7 @@ import { Router } from 'express';
 import pool from '../db.js';
 import { requireAuth, deductBalance, addBalance, recordStats } from '../middleware/auth.js';
 import { ITEM_DEFS } from '../itemDefs.js';
+import { pushDrop } from './drops.js';
 
 const router = Router();
 
@@ -81,7 +82,7 @@ function caseToDto(c) {
         icon: def?.icon ?? '📦',
         color: def?.color ?? '#fff',
         value: def?.value ?? 0,
-        chance: i.chance,
+        chance: parseFloat((i.chance * 100).toFixed(4)), // send as percentage (game.ts divides by 100)
         prize: def?.value ?? 0,
       };
     }),
@@ -125,6 +126,20 @@ router.post('/game/play', requireAuth, async (req, res) => {
   const itemId = itemRows[0]?.id;
 
   recordStats(req.user.id, 'cases', c.price, 0);
+
+  // Broadcast to drops ticker
+  pushDrop({
+    nick: req.user.nickname,
+    caseId: type,
+    caseName: c.name,
+    itemDefId: rolled.itemDefId,
+    name: def?.name ?? rolled.itemDefId,
+    nameUa: def?.nameUa ?? rolled.itemDefId,
+    rarity: def?.rarity ?? 'common',
+    icon: def?.icon ?? '📦',
+    color: def?.color ?? '#9ca3af',
+    ts: Date.now(),
+  });
 
   res.json({
     item: def?.name ?? rolled.itemDefId,

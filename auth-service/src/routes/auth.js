@@ -98,4 +98,24 @@ router.get('/users/me/balance', requireAuth, async (req, res) => {
   }
 });
 
+// PATCH /api/v1/accounts/users/me — change nickname
+router.patch('/users/me', requireAuth, async (req, res) => {
+  const { nickname } = req.body;
+  if (!nickname?.trim() || nickname.trim().length < 3 || nickname.trim().length > 50) {
+    return res.status(400).json({ ok: false, error: 'Nickname must be 3-50 characters' });
+  }
+  try {
+    const { rows } = await pool.query(
+      `UPDATE users SET nickname = $1 WHERE id = $2 RETURNING *`,
+      [nickname.trim(), req.user.id]
+    );
+    if (!rows[0]) return res.status(404).json({ ok: false, error: 'User not found' });
+    res.json({ ok: true, user: userDto(rows[0]) });
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ ok: false, error: 'Nickname already taken' });
+    console.error(err);
+    res.status(500).json({ ok: false, error: 'Internal server error' });
+  }
+});
+
 export default router;
