@@ -1,7 +1,6 @@
 version: '3.8'
 
 services:
-  # API Gateway (Nginx)
   nginx:
     image: nginx:alpine
     volumes:
@@ -12,7 +11,6 @@ services:
       - auth-service
       - games-service
 
-  # База даних для користувачів
   postgres:
     image: postgres:15-alpine
     environment:
@@ -24,30 +22,34 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
 
-  # Redis для збереження кешу та WebSocket-сесій
   redis:
     image: redis:7-alpine
     ports:
       - "6379:6379"
 
-  # Мікросервіс авторизації
   auth-service:
     build: ./auth-service
     environment:
       - PORT=5001
       - DATABASE_URL=postgresql://casino_admin:casino_password@postgres:5432/casino_db
-      - JWT_SECRET=supersecretjwtkey
+      - JWT_SECRET=supersecretjwtkey_casino_2025
     ports:
       - "5001:5001"
+    depends_on:
+      - postgres
 
-  # Мікросервіс одиночних ігор (Dice, Mines, Plinko)
   games-service:
     build: ./games-service
     environment:
       - PORT=5002
+      - DATABASE_URL=postgresql://casino_admin:casino_password@postgres:5432/casino_db
+      - JWT_SECRET=supersecretjwtkey_casino_2025
       - AUTH_SERVICE_URL=http://auth-service:5001
     ports:
       - "5002:5002"
+    depends_on:
+      - postgres
+      - auth-service
 
 volumes:
   pgdata:

@@ -1,43 +1,71 @@
 import express from 'express';
-import cors from 'cors';
+import { initDb } from './db.js';
+import { requireAuth } from './middleware/auth.js';
+import authRouter from './routes/auth.js';
+import ticketsRouter from './routes/tickets.js';
+import adminRouter from './routes/admin.js';
+import statsRouter from './routes/stats.js';
+import pool from './db.js';
 
 const app = express();
 app.use(express.json());
-app.use(cors());
 
-// Створюємо окремий роутер для акаунтів
-const accountsRouter = express.Router();
+app.use('/api/v1/accounts', authRouter);
+app.use('/api/v1/tickets', ticketsRouter);
+app.use('/api/v1/admin', adminRouter);
+app.use('/api/v1/stats', statsRouter);
 
-accountsRouter.post('/auth/register', (req, res) => {
-    // логіка реєстрації
-    res.status(201).json({ ok: true, token: 'jwt_token', user: { id: '1', nickname: req.body.nickname, balance: 1000 } });
+// POST /api/balance/apply
+app.post('/api/balance/apply', requireAuth, async (req, res) => {
+  const { delta } = req.body;
+  if (typeof delta !== 'number') {
+    return res.status(400).json({ ok: false, error: 'delta must be a number' });
+  }
+  try {
+    const { rows } = await pool.query(
+      `UPDATE users SET balance = balance + $1 WHERE id = $2 RETURNING balance`,
+      [delta, req.user.id]
+    );
+    if (!rows[0]) return res.status(404).json({ ok: false, error: 'User not found' });
+    res.json({ ok: true, balance: parseFloat(rows[0].balance) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ ok: false, error: 'Internal server error' });
+  }
 });
 
-accountsRouter.post('/auth/login', (req, res) => {
-    // логіка логіну
-    res.json({ ok: true, token: 'jwt_token', user: { id: '1', nickname: 'Test', balance: 1000 } });
+// GET /api/me — alias
+app.get('/api/me', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(`SELECT * FROM users WHERE id = $1`, [req.user.id]);
+    if (!rows[0]) return res.status(404).json({ ok: false, error: 'User not found' });
+    const u = rows[0];
+    res.json({
+      ok: true,
+      user: { id: u.id, nickname: u.nickname, discord: u.discord, role: u.role, balance: parseFloat(u.balance) },
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ ok: false, error: 'Internal server error' });
+  }
 });
 
-accountsRouter.post('/logout', (req, res) => {
-    res.json({ ok: true });
-});
+const PORT = process.env.PORT || 5001;
 
-accountsRouter.get('/users/me', (req, res) => {
-    res.json({ ok: true, user: { id: '1', nickname: 'Test', balance: 1000 } });
-});
+async function start() {
+  let retries = 10;
+  while (retries > 0) {
+    try {
+      await initDb();
+      console.log('Database initialized');
+      break;
+    } catch (err) {
+      retries--;
+      console.log(`DB not ready, retrying... (${retries} left)`);
+      await new Promise(r => setTimeout(r, 3000));
+    }
+  }
+  app.listen(PORT, () => console.log(`Auth Service running on port ${PORT}`));
+}
 
-accountsRouter.get('/users/me/balance', (req, res) => {
-    res.json({ ok: true, balance: 1000 });
-});
-
-// Підключаємо роутер до головного шляху, який очікує фронтенд
-app.use('/api/v1/accounts', accountsRouter);
-
-// Окремий роут для застосування балансу (бо він не в /accounts/)
-app.post('/api/balance/apply', (req, res) => {
-    const { delta } = req.body;
-    // логіка зміни балансу
-    res.json({ ok: true, balance: 1000 + delta });
-});
-
-app.listen(5001, () => console.log('Auth Service is running'));
+start();

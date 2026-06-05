@@ -1,45 +1,44 @@
 import express from 'express';
-import cors from 'cors';
+import { initDb } from './db.js';
+import diceRouter from './routes/dice.js';
+import rouletteRouter from './routes/roulette.js';
+import minesRouter from './routes/mines.js';
+import casesRouter from './routes/cases.js';
+import plinkoRouter from './routes/plinko.js';
+import battlesRouter from './routes/battles.js';
+import itemsRouter from './routes/items.js';
+import auctionRouter from './routes/auction.js';
+import clickerRouter from './routes/clicker.js';
 
 const app = express();
 app.use(express.json());
-app.use(cors());
+
+app.use('/api/v1/games/dice', diceRouter);
+app.use('/api/v1/games/roulette', rouletteRouter);
+app.use('/api/v1/games/mines', minesRouter);
+app.use('/api/v1/games/cases', casesRouter);
+app.use('/api/v1/games/plinko', plinkoRouter);
+app.use('/api/v1/battles', battlesRouter);
+app.use('/api/v1/items', itemsRouter);
+app.use('/api/v1/auction', auctionRouter);
+app.use('/api/v1/clicker', clickerRouter);
 
 const PORT = process.env.PORT || 5002;
 
-// Ендпоінт для гри Dice (Кубики)
-app.post('/dice/bet', (req, res) => {
-    const { betAmount, targetMultiplier, condition } = req.body;
-
-    // Перевірка авторизації (в реальності тут має перевірятися токен або йти запит до auth-service)
-    const authHeader = req.headers.authorization;
-    if (!authHeader) {
-        return res.status(401).json({ error: 'Unauthorized' });
+async function start() {
+  let retries = 10;
+  while (retries > 0) {
+    try {
+      await initDb();
+      console.log('Database initialized');
+      break;
+    } catch (err) {
+      retries--;
+      console.log(`DB not ready, retrying... (${retries} left)`);
+      await new Promise(r => setTimeout(r, 3000));
     }
+  }
+  app.listen(PORT, () => console.log(`Games Service running on port ${PORT}`));
+}
 
-    // Логіка генерації випадкового числа від 0.01 до 99.99
-    const rollResult = parseFloat((Math.random() * 99.98 + 0.01).toFixed(2));
-    let win = false;
-
-    // Визначення математичного шансу виграшу
-    const winChance = 99.0 / targetMultiplier;
-
-    if (condition === 'over' && rollResult > (100 - winChance)) {
-        win = true;
-    } else if (condition === 'under' && rollResult < winChance) {
-        win = true;
-    }
-
-    const payout = win ? betAmount * targetMultiplier : 0;
-
-    res.json({
-        roll: rollResult,
-        win,
-        payout,
-        newBalance: 4500.0 + payout - betAmount // Заглушка для демонстрації зміни балансу
-    });
-});
-
-app.listen(PORT, () => {
-    console.log(`Games Service працює на порту ${PORT}`);
-});
+start();
