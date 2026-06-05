@@ -10,16 +10,17 @@ const LEGENDARY_IDS = ['ancient_relic', 'void_artifact', 'phoenix_feather'];
 // GET /api/v1/stats/me
 router.get('/me', requireAuth, async (req, res) => {
   try {
-    const [statsRes, balRes, clickerRes, itemsRes, mythicRes] = await Promise.all([
+    const [statsRes, balRes, clickerRes, itemsRes, mythicRes, manualAchRes] = await Promise.all([
       pool.query(`SELECT * FROM game_stats WHERE user_id = $1`, [req.user.id]),
       pool.query(`SELECT balance FROM users WHERE id = $1`, [req.user.id]),
       pool.query(`SELECT click_power, auto_power, coins FROM clicker_state WHERE user_id = $1`, [req.user.id]).catch(() => ({ rows: [] })),
       pool.query(`SELECT COUNT(*) as cnt FROM items WHERE user_id = $1`, [req.user.id]).catch(() => ({ rows: [{ cnt: 0 }] })),
       pool.query(`SELECT COUNT(*) as cnt FROM items WHERE user_id = $1 AND item_def_id = ANY($2::text[])`,
         [req.user.id, MYTHIC_IDS]).catch(() => ({ rows: [{ cnt: 0 }] })),
+      pool.query(`SELECT achievement_id FROM user_achievements WHERE user_id = $1`, [req.user.id]).catch(() => ({ rows: [] })),
     ]);
 
-    const byGame: Record<string, any> = {};
+    const byGame = {};
     let totalGames = 0, totalWagered = 0, totalWon = 0, biggestWin = 0;
     for (const row of statsRes.rows) {
       byGame[row.game_type] = {
@@ -45,10 +46,17 @@ router.get('/me', requireAuth, async (req, res) => {
     const autoPower = Number(clicker?.auto_power ?? 0);
     const balance = parseFloat(balRes.rows[0]?.balance ?? 0);
 
+    // Manually granted achievements (admin)
+    const manualAchIds = new Set(manualAchRes.rows.map(r => r.achievement_id));
+
     // Compute achievements
     const achievements = [];
+    // Add all manually granted ones first
+    for (const achId of manualAchIds) {
+      achievements.push({ id: achId, manual: true });
+    }
 
-    if (mythicCount > 0) {
+    if (mythicCount > 0 && !manualAchIds.has('mythic_hunter')) {
       achievements.push({
         id: 'mythic_hunter', icon: '✨', rarity: 'mythic',
         name: 'Mythic Hunter', nameUa: 'Мисливець за Mythic',

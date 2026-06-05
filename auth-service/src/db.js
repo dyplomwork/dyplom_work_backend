@@ -24,6 +24,14 @@ export async function initDb() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       resolved_at TIMESTAMPTZ
     );
+
+    CREATE TABLE IF NOT EXISTS user_achievements (
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      achievement_id VARCHAR(50) NOT NULL,
+      granted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      granted_by UUID REFERENCES users(id),
+      PRIMARY KEY (user_id, achievement_id)
+    );
   `);
 }
 
