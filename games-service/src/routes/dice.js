@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { requireAuth, deductBalance, addBalance, recordStats } from '../middleware/auth.js';
+import { pushBigWin } from './drops.js';
 
 const router = Router();
 
@@ -45,6 +46,10 @@ router.post('/game/play', requireAuth, async (req, res) => {
 
   if (isWin) await addBalance(req.user.id, payout);
   recordStats(req.user.id, 'dice', bet, payout);
+
+  if (isWin && payout >= bet * 20) {
+    pushBigWin({ nick: req.user.nickname, game: 'Dice', amount: payout, mult: payout / bet });
+  }
 
   res.json({ roll, isWin, payout });
 });

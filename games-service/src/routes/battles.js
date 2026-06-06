@@ -84,6 +84,22 @@ async function tryStartCountdown(battleId) {
   }, 3000);
 }
 
+// GET /api/v1/battles/history — finished battles (for admin history tab)
+router.get('/history', requireAuth, async (req, res) => {
+  try {
+    const limit = Math.min(Number(req.query.limit) || 100, 500);
+    const { rows } = await pool.query(
+      `SELECT * FROM battles WHERE status = 'FINISHED'
+       ORDER BY updated_at DESC LIMIT $1`,
+      [limit]
+    );
+    res.json(rows.map(battleDto));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ ok: false, error: 'Internal server error' });
+  }
+});
+
 // GET /api/v1/battles
 router.get('/', requireAuth, async (req, res) => {
   const { rows } = await pool.query(

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import pool from '../db.js';
 import { requireAuth, deductBalance, addBalance } from '../middleware/auth.js';
+import { pushBigWin } from './drops.js';
 
 const router = Router();
 
@@ -132,6 +133,11 @@ router.post('/game/finish', requireAuth, async (req, res) => {
   const multiplier = calcMultiplier(openedCount, session.mines_count);
   const win = parseFloat((parseFloat(session.bet) * multiplier).toFixed(2));
   if (win > 0) await addBalance(req.user.id, win);
+
+  const bet = parseFloat(session.bet);
+  if (bet > 0 && win >= bet * 20) {
+    pushBigWin({ nick: req.user.nickname, game: 'Mines', amount: win, mult: win / bet });
+  }
 
   res.json({ win, field: buildField(session.mine_positions) });
 });
