@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { BIG_WIN_TIERS, getBigWinTier } from '../constants/index.js';
 
 const router = Router();
 
@@ -11,23 +12,24 @@ export function pushDrop(drop) {
   if (recentDrops.length > MAX_DROPS) recentDrops.pop();
 }
 
-// Push a big/super win into the same ticker stream
+/**
+ * Push a Big / Mega / Super Win event into the live ticker.
+ * Tier is chosen automatically based on the mult ratio.
+ */
 export function pushBigWin({ nick, game, amount, mult }) {
-  const tier = mult >= 100 ? 'super' : mult >= 50 ? 'mega' : 'big';
-  const labels = { super: 'SUPER WIN', mega: 'MEGA WIN', big: 'BIG WIN' };
-  const icons  = { super: '🌟', mega: '💥', big: '🔥' };
-  const colors = { super: '#ec4899', mega: '#f59e0b', big: '#a855f7' };
+  const tierKey = getBigWinTier(mult);
+  const tier    = BIG_WIN_TIERS[tierKey];
   pushDrop({
-    type: 'bigwin',
+    type:   'bigwin',
     nick,
-    icon: icons[tier],
-    name: `${labels[tier]} ${game}`,
-    nameUa: `${labels[tier]} ${game}`,
-    rarity: tier === 'super' ? 'mythic' : tier === 'mega' ? 'legendary' : 'epic',
-    color: colors[tier],
-    ts: Date.now(),
+    icon:   tier.icon,
+    name:   `${tier.label} ${game}`,
+    nameUa: `${tier.label} ${game}`,
+    rarity: tier.rarity,
+    color:  tier.color,
+    ts:     Date.now(),
     amount,
-    mult: Math.round(mult),
+    mult:   Math.round(mult),
   });
 }
 

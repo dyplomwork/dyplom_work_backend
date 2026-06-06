@@ -1,27 +1,13 @@
 import { Router } from 'express';
 import pool from '../db.js';
 import { requireAdmin } from '../middleware/auth.js';
+import { ALL_ACHIEVEMENTS, MYTHIC_IDS, getAchievement } from '../constants/achievements.js';
+import { adminUserDto } from '../utils/dto.js';
 
 const router = Router();
 
-// All predefined achievements (for manual granting)
-const ALL_ACHIEVEMENTS = [
-  { id: 'mythic_hunter',  icon: '✨', rarity: 'mythic',     name: 'Mythic Hunter',       nameUa: 'Мисливець за Mythic' },
-  { id: 'millionaire',    icon: '💰', rarity: 'legendary',  name: 'Millionaire',         nameUa: 'Мільйонер' },
-  { id: 'big_winner',     icon: '🏆', rarity: 'epic',       name: 'Big Winner',          nameUa: 'Великий виграш' },
-  { id: 'collector_pro',  icon: '🗃️', rarity: 'rare',       name: 'Master Collector',    nameUa: 'Майстер колекціонер' },
-  { id: 'collector',      icon: '📦', rarity: 'uncommon',   name: 'Collector',           nameUa: 'Колекціонер' },
-  { id: 'veteran',        icon: '⭐', rarity: 'rare',       name: 'Veteran Player',      nameUa: 'Ветеран' },
-  { id: 'click_master',   icon: '👆', rarity: 'uncommon',   name: 'Click Master',        nameUa: 'Майстер кліків' },
-  { id: 'auto_master',    icon: '🤖', rarity: 'rare',       name: 'Automation Expert',   nameUa: 'Експерт автоматизації' },
-  { id: 'rich',           icon: '💎', rarity: 'epic',       name: 'High Roller',         nameUa: 'Великий гравець' },
-  { id: 'high_roller',    icon: '🎰', rarity: 'epic',       name: 'Casino Regular',      nameUa: 'Постійний клієнт' },
-  { id: 'special',        icon: '🌟', rarity: 'mythic',     name: 'Special Award',       nameUa: 'Особлива нагорода' },
-  { id: 'early_bird',     icon: '🐦', rarity: 'uncommon',   name: 'Early Adopter',       nameUa: 'Ранній користувач' },
-  { id: 'loyal',          icon: '❤️', rarity: 'rare',       name: 'Loyal Player',        nameUa: 'Лояльний гравець' },
-];
-
-// All item definitions (mirrored from games-service for admin panel)
+// Item definitions list for admin panel (id + display fields only)
+// Full definitions with value/color live in games-service/itemDefs.js
 const ITEM_DEFS_LIST = [
   { id: 'bronze_shard',    name: 'Bronze Shard',    icon: '🪙', rarity: 'common' },
   { id: 'iron_nugget',     name: 'Iron Nugget',     icon: '⚙️', rarity: 'common' },
@@ -42,17 +28,6 @@ const ITEM_DEFS_LIST = [
   { id: 'cosmos_gem',      name: 'Cosmos Gem',      icon: '🌌', rarity: 'mythic' },
 ];
 
-function userDto(row) {
-  return {
-    id: row.id,
-    nickname: row.nickname,
-    discord: row.discord,
-    role: row.role,
-    balance: parseFloat(row.balance),
-    createdAt: row.created_at,
-  };
-}
-
 // ── Users ──────────────────────────────────────────────────────────────
 
 // GET /api/v1/admin/users
@@ -67,7 +42,7 @@ router.get('/users', requireAdmin, async (req, res) => {
     res.json({
       ok: true,
       users: rows.map(r => ({
-        ...userDto(r),
+        ...adminUserDto(r),
         itemCount: parseInt(r.item_count),
         achCount: parseInt(r.ach_count),
       })),
@@ -84,7 +59,6 @@ router.get('/users/:id', requireAdmin, async (req, res) => {
     const { rows } = await pool.query(`SELECT * FROM users WHERE id = $1`, [req.params.id]);
     if (!rows[0]) return res.status(404).json({ ok: false, error: 'User not found' });
 
-    const MYTHIC_IDS = ['divine_relic', 'cosmos_gem'];
     const [statsRes, clickerRes, itemsRes, achRes, mythicRes] = await Promise.all([
       pool.query(`SELECT * FROM game_stats WHERE user_id = $1`, [req.params.id]),
       pool.query(`SELECT coins, click_power, auto_power FROM clicker_state WHERE user_id = $1`, [req.params.id]).catch(() => ({ rows: [] })),
@@ -122,14 +96,14 @@ router.get('/users/:id', requireAdmin, async (req, res) => {
     if (totalWagered >= 1000000) computedAchIds.add('high_roller');
 
     const allAchIds = new Set([...manualAchIds, ...computedAchIds]);
-    const achievements = [...allAchIds].map(id => {
-      const def = ALL_ACHIEVEMENTS.find(a => a.id === id) ?? { id, icon: '🏅', name: id, nameUa: id, rarity: 'common' };
-      return { ...def, manual: manualAchIds.has(id) };
-    });
+    const achievements = [...allAchIds].map(id => ({
+      ...getAchievement(id),
+      manual: manualAchIds.has(id),
+    }));
 
     res.json({
       ok: true,
-      user: userDto(rows[0]),
+      user: adminUserDto(rows[0]),
       clicker: clicker ? {
         coins: Number(clicker.coins),
         clickPower: Number(clicker.click_power),
@@ -165,7 +139,7 @@ router.patch('/users/:id', requireAdmin, async (req, res) => {
       [nickname.trim(), role, balance, req.params.id]
     );
     if (!rows[0]) return res.status(404).json({ ok: false, error: 'User not found' });
-    res.json({ ok: true, user: userDto(rows[0]) });
+    res.json({ ok: true, user: adminUserDto(rows[0]) });
   } catch (err) {
     if (err.code === '23505') return res.status(409).json({ ok: false, error: 'Nickname already taken' });
     console.error(err);

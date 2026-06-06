@@ -1,12 +1,12 @@
 import { Router } from 'express';
 import pool from '../db.js';
-import { requireAuth, deductBalance, addBalance } from '../middleware/auth.js';
+import { requireAuth, deductBalance, addBalance, recordStats } from '../middleware/auth.js';
 import { pushBigWin } from './drops.js';
+import { MINES_PAYOUT_FACTOR, BIG_WIN_THRESHOLD } from '../constants/index.js';
 
 const router = Router();
 
 const TOTAL_CELLS = 25;
-const HOUSE_EDGE = 0.97;
 
 function calcMultiplier(opened, mines) {
   if (opened === 0) return 1;
@@ -14,7 +14,7 @@ function calcMultiplier(opened, mines) {
   for (let i = 0; i < opened; i++) {
     p *= (TOTAL_CELLS - mines - i) / (TOTAL_CELLS - i);
   }
-  return parseFloat(((1 / p) * HOUSE_EDGE).toFixed(4));
+  return parseFloat(((1 / p) * MINES_PAYOUT_FACTOR).toFixed(4));
 }
 
 function generateMinePositions(count) {
@@ -35,7 +35,7 @@ function buildField(minePositions) {
 // GET /api/v1/games/mines/game/multiplier?opened=X&mines=Y
 router.get('/game/multiplier', (req, res) => {
   const opened = parseInt(req.query.opened);
-  const mines = parseInt(req.query.mines);
+  const mines  = parseInt(req.query.mines);
   if (isNaN(opened) || isNaN(mines) || opened < 0 || mines < 1 || mines > 24 || opened > TOTAL_CELLS - mines) {
     return res.status(400).json({ ok: false, error: 'Invalid params' });
   }
@@ -55,9 +55,11 @@ router.get('/game', requireAuth, async (req, res) => {
 
 // POST /api/v1/games/mines/game/start
 router.post('/game/start', requireAuth, async (req, res) => {
-  const bet = Number(req.body.bet);
+  const bet   = Number(req.body.bet);
   const mines = parseInt(req.body.mines);
-  if (!Number.isFinite(bet) || bet <= 0) return res.status(400).json({ ok: false, error: 'Invalid bet' });
+  if (!Number.isFinite(bet) || bet <= 0) {
+    return res.status(400).json({ ok: false, error: 'Invalid bet' });
+  }
   if (isNaN(mines) || mines < 1 || mines > 24) {
     return res.status(400).json({ ok: false, error: 'mines must be between 1 and 24' });
   }
@@ -83,7 +85,6 @@ router.post('/game/step', requireAuth, async (req, res) => {
   const row = parseInt(req.body.row);
   const col = parseInt(req.body.col);
 
-  // Validate bounds
   if (isNaN(row) || isNaN(col) || row < 0 || row > 4 || col < 0 || col > 4) {
     return res.status(400).json({ ok: false, error: 'row and col must be 0–4' });
   }
@@ -95,7 +96,6 @@ router.post('/game/step', requireAuth, async (req, res) => {
   const session = rows[0];
   if (!session) return res.status(404).json({ ok: false, error: 'No active game' });
 
-  // Prevent revealing an already-opened cell
   const alreadyOpened = session.opened.some(p => p.row === row && p.col === col);
   if (alreadyOpened) {
     return res.status(400).json({ ok: false, error: 'Cell already revealed' });
@@ -103,6 +103,8 @@ router.post('/game/step', requireAuth, async (req, res) => {
 
   const isMine = session.mine_positions.some(p => p.row === row && p.col === col);
   if (isMine) {
+    // Record loss — player loses full bet, wins 0
+    recordStats(req.user.id, 'mines', parseFloat(session.bet), 0);
     await pool.query(`UPDATE mines_sessions SET status = 'FINISHED' WHERE id = $1`, [session.id]);
     return res.json({ finish: true, field: buildField(session.mine_positions) });
   }
@@ -129,13 +131,14 @@ router.post('/game/finish', requireAuth, async (req, res) => {
   await pool.query(`UPDATE mines_sessions SET status = 'FINISHED' WHERE id = $1`, [session.id]);
 
   const openedCount = session.opened.length;
-  // Require at least 1 opened cell to get a win (0 opened = bet returned at 1x)
-  const multiplier = calcMultiplier(openedCount, session.mines_count);
-  const win = parseFloat((parseFloat(session.bet) * multiplier).toFixed(2));
-  if (win > 0) await addBalance(req.user.id, win);
+  const multiplier  = calcMultiplier(openedCount, session.mines_count);
+  const bet         = parseFloat(session.bet);
+  const win         = parseFloat((bet * multiplier).toFixed(2));
 
-  const bet = parseFloat(session.bet);
-  if (bet > 0 && win >= bet * 20) {
+  if (win > 0) await addBalance(req.user.id, win);
+  recordStats(req.user.id, 'mines', bet, win);
+
+  if (bet > 0 && win >= bet * BIG_WIN_THRESHOLD) {
     pushBigWin({ nick: req.user.nickname, game: 'Mines', amount: win, mult: win / bet });
   }
 

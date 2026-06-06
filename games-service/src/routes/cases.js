@@ -125,7 +125,7 @@ router.post('/game/play', requireAuth, async (req, res) => {
   );
   const itemId = itemRows[0]?.id;
 
-  recordStats(req.user.id, 'cases', c.price, 0);
+  recordStats(req.user.id, 'cases', c.price, payout);
 
   // Broadcast to drops ticker
   pushDrop({

@@ -1,28 +1,9 @@
 import { Router } from 'express';
 import pool from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
+import { MYTHIC_IDS, getAchievement } from '../constants/achievements.js';
 
 const router = Router();
-
-const MYTHIC_IDS = ['divine_relic', 'cosmos_gem'];
-const LEGENDARY_IDS = ['ancient_relic', 'void_artifact', 'phoenix_feather'];
-
-// All achievement definitions (must match admin.js ALL_ACHIEVEMENTS)
-const ALL_ACHIEVEMENTS = [
-  { id: 'mythic_hunter', icon: '✨', rarity: 'mythic',    name: 'Mythic Hunter',       nameUa: 'Мисливець за Mythic',  desc: 'Dropped a Mythic item',           descUa: 'Випав Mythic предмет' },
-  { id: 'millionaire',   icon: '💰', rarity: 'legendary', name: 'Millionaire',         nameUa: 'Мільйонер',            desc: 'Won 1,000,000+ K in a single round', descUa: 'Виграли 1,000,000+ K за раунд' },
-  { id: 'big_winner',    icon: '🏆', rarity: 'epic',      name: 'Big Winner',          nameUa: 'Великий виграш',       desc: 'Won 100,000+ K in a single round',descUa: 'Виграли 100,000+ K за раунд' },
-  { id: 'collector_pro', icon: '🗃️', rarity: 'rare',      name: 'Master Collector',   nameUa: 'Майстер колекціонер',  desc: '50+ items collected',             descUa: '50+ предметів зібрано' },
-  { id: 'collector',     icon: '📦', rarity: 'uncommon',  name: 'Collector',           nameUa: 'Колекціонер',          desc: '10+ items collected',             descUa: '10+ предметів зібрано' },
-  { id: 'veteran',       icon: '⭐', rarity: 'rare',      name: 'Veteran Player',      nameUa: 'Ветеран',              desc: '100+ games played',               descUa: '100+ ігор зіграно' },
-  { id: 'click_master',  icon: '👆', rarity: 'uncommon',  name: 'Click Master',        nameUa: 'Майстер кліків',       desc: 'Click power ≥ 50',               descUa: 'Потужність кліку ≥ 50' },
-  { id: 'auto_master',   icon: '🤖', rarity: 'rare',      name: 'Automation Expert',   nameUa: 'Експерт автоматизації',desc: 'Auto power ≥ 30',                descUa: 'Авто сила ≥ 30' },
-  { id: 'rich',          icon: '💎', rarity: 'epic',      name: 'High Roller',         nameUa: 'Великий гравець',      desc: 'Balance ≥ 500,000 K',            descUa: 'Баланс ≥ 500,000 K' },
-  { id: 'high_roller',   icon: '🎰', rarity: 'epic',      name: 'Casino Regular',      nameUa: 'Постійний клієнт',     desc: 'Wagered 1,000,000+ K total',     descUa: 'Поставлено 1,000,000+ K загалом' },
-  { id: 'special',       icon: '🌟', rarity: 'mythic',    name: 'Special Award',       nameUa: 'Особлива нагорода',    desc: 'Special recognition',            descUa: 'Особлива відзнака' },
-  { id: 'early_bird',    icon: '🐦', rarity: 'uncommon',  name: 'Early Adopter',       nameUa: 'Ранній користувач',    desc: 'One of the first players',       descUa: 'Один з перших гравців' },
-  { id: 'loyal',         icon: '❤️', rarity: 'rare',      name: 'Loyal Player',        nameUa: 'Лояльний гравець',     desc: 'Long-time community member',     descUa: 'Давній учасник спільноти' },
-];
 
 // GET /api/v1/stats/me
 router.get('/me', requireAuth, async (req, res) => {
@@ -32,8 +13,10 @@ router.get('/me', requireAuth, async (req, res) => {
       pool.query(`SELECT balance FROM users WHERE id = $1`, [req.user.id]),
       pool.query(`SELECT click_power, auto_power, coins FROM clicker_state WHERE user_id = $1`, [req.user.id]).catch(() => ({ rows: [] })),
       pool.query(`SELECT COUNT(*) as cnt FROM items WHERE user_id = $1`, [req.user.id]).catch(() => ({ rows: [{ cnt: 0 }] })),
-      pool.query(`SELECT COUNT(*) as cnt FROM items WHERE user_id = $1 AND item_def_id = ANY($2::text[])`,
-        [req.user.id, MYTHIC_IDS]).catch(() => ({ rows: [{ cnt: 0 }] })),
+      pool.query(
+        `SELECT COUNT(*) as cnt FROM items WHERE user_id = $1 AND item_def_id = ANY($2::text[])`,
+        [req.user.id, MYTHIC_IDS]
+      ).catch(() => ({ rows: [{ cnt: 0 }] })),
       pool.query(`SELECT achievement_id FROM user_achievements WHERE user_id = $1`, [req.user.id]).catch(() => ({ rows: [] })),
     ]);
 
@@ -41,110 +24,50 @@ router.get('/me', requireAuth, async (req, res) => {
     let totalGames = 0, totalWagered = 0, totalWon = 0, biggestWin = 0;
     for (const row of statsRes.rows) {
       byGame[row.game_type] = {
-        gamesPlayed: parseInt(row.games_played),
+        gamesPlayed:  parseInt(row.games_played),
         totalWagered: parseFloat(row.total_wagered),
-        totalWon: parseFloat(row.total_won),
-        biggestWin: parseFloat(row.biggest_win),
+        totalWon:     parseFloat(row.total_won),
+        biggestWin:   parseFloat(row.biggest_win),
       };
-      totalGames += parseInt(row.games_played);
+      totalGames   += parseInt(row.games_played);
       totalWagered += parseFloat(row.total_wagered);
-      totalWon += parseFloat(row.total_won);
-      biggestWin = Math.max(biggestWin, parseFloat(row.biggest_win));
+      totalWon     += parseFloat(row.total_won);
+      biggestWin    = Math.max(biggestWin, parseFloat(row.biggest_win));
     }
 
     const favoriteGame = statsRes.rows.length
       ? statsRes.rows.reduce((a, b) => parseInt(a.games_played) > parseInt(b.games_played) ? a : b).game_type
       : null;
 
-    const totalItems = parseInt(itemsRes.rows[0]?.cnt ?? 0);
+    const totalItems  = parseInt(itemsRes.rows[0]?.cnt  ?? 0);
     const mythicCount = parseInt(mythicRes.rows[0]?.cnt ?? 0);
-    const clicker = clickerRes.rows[0];
-    const clickPower = Number(clicker?.click_power ?? 0);
-    const autoPower = Number(clicker?.auto_power ?? 0);
-    const balance = parseFloat(balRes.rows[0]?.balance ?? 0);
+    const clicker     = clickerRes.rows[0];
+    const clickPower  = Number(clicker?.click_power ?? 0);
+    const autoPower   = Number(clicker?.auto_power  ?? 0);
+    const balance     = parseFloat(balRes.rows[0]?.balance ?? 0);
 
-    // Manually granted achievements (admin)
+    // Manually granted achievements (by admin)
     const manualAchIds = new Set(manualAchRes.rows.map(r => r.achievement_id));
 
-    // Compute achievements
-    const achievements = [];
-    // Add all manually granted ones first — with full definition data
-    for (const achId of manualAchIds) {
-      const def = ALL_ACHIEVEMENTS.find(a => a.id === achId) ?? {
-        id: achId, icon: '🏅', rarity: 'common',
-        name: achId, nameUa: achId, desc: '', descUa: '',
-      };
-      achievements.push({ ...def, manual: true });
-    }
+    // Compute auto-earned achievement IDs based on current player stats
+    const autoAchIds = new Set();
+    if (mythicCount > 0)           autoAchIds.add('mythic_hunter');
+    if (biggestWin >= 1_000_000)   autoAchIds.add('millionaire');
+    else if (biggestWin >= 100_000) autoAchIds.add('big_winner');
+    if (totalItems >= 50)          autoAchIds.add('collector_pro');
+    else if (totalItems >= 10)     autoAchIds.add('collector');
+    if (totalGames >= 100)         autoAchIds.add('veteran');
+    if (clickPower >= 50)          autoAchIds.add('click_master');
+    if (autoPower >= 30)           autoAchIds.add('auto_master');
+    if (balance >= 500_000)        autoAchIds.add('rich');
+    if (totalWagered >= 1_000_000) autoAchIds.add('high_roller');
 
-    if (mythicCount > 0 && !manualAchIds.has('mythic_hunter')) {
-      achievements.push({
-        id: 'mythic_hunter', icon: '✨', rarity: 'mythic',
-        name: 'Mythic Hunter', nameUa: 'Мисливець за Mythic',
-        desc: 'Dropped a Mythic item', descUa: 'Випав Mythic предмет',
-      });
-    }
-    if (biggestWin >= 1000000) {
-      achievements.push({
-        id: 'millionaire', icon: '💰', rarity: 'legendary',
-        name: 'Millionaire', nameUa: 'Мільйонер',
-        desc: 'Won 1,000,000+ K in a single round', descUa: 'Виграли 1,000,000+ K за раунд',
-      });
-    } else if (biggestWin >= 100000) {
-      achievements.push({
-        id: 'big_winner', icon: '🏆', rarity: 'epic',
-        name: 'Big Winner', nameUa: 'Великий виграш',
-        desc: 'Won 100,000+ K in a single round', descUa: 'Виграли 100,000+ K за раунд',
-      });
-    }
-    if (totalItems >= 50) {
-      achievements.push({
-        id: 'collector_pro', icon: '🗃️', rarity: 'rare',
-        name: 'Master Collector', nameUa: 'Майстер колекціонер',
-        desc: '50+ items collected', descUa: '50+ предметів зібрано',
-      });
-    } else if (totalItems >= 10) {
-      achievements.push({
-        id: 'collector', icon: '📦', rarity: 'uncommon',
-        name: 'Collector', nameUa: 'Колекціонер',
-        desc: '10+ items collected', descUa: '10+ предметів зібрано',
-      });
-    }
-    if (totalGames >= 100) {
-      achievements.push({
-        id: 'veteran', icon: '⭐', rarity: 'rare',
-        name: 'Veteran Player', nameUa: 'Ветеран',
-        desc: '100+ games played', descUa: '100+ ігор зіграно',
-      });
-    }
-    if (clickPower >= 50) {
-      achievements.push({
-        id: 'click_master', icon: '👆', rarity: 'uncommon',
-        name: 'Click Master', nameUa: 'Майстер кліків',
-        desc: 'Click power ≥ 50', descUa: 'Потужність кліку ≥ 50',
-      });
-    }
-    if (autoPower >= 30) {
-      achievements.push({
-        id: 'auto_master', icon: '🤖', rarity: 'rare',
-        name: 'Automation Expert', nameUa: 'Експерт автоматизації',
-        desc: 'Auto power ≥ 30', descUa: 'Авто сила ≥ 30',
-      });
-    }
-    if (balance >= 500000) {
-      achievements.push({
-        id: 'rich', icon: '💎', rarity: 'epic',
-        name: 'High Roller', nameUa: 'Великий гравець',
-        desc: 'Balance ≥ 500,000 K', descUa: 'Баланс ≥ 500,000 K',
-      });
-    }
-    if (totalWagered >= 1000000) {
-      achievements.push({
-        id: 'high_roller', icon: '🎰', rarity: 'epic',
-        name: 'Casino Regular', nameUa: 'Постійний клієнт',
-        desc: 'Wagered 1,000,000+ K total', descUa: 'Поставлено 1,000,000+ K загалом',
-      });
-    }
+    // Merge manual + auto; use getAchievement() as single source of truth for labels/icons
+    const allAchIds = new Set([...manualAchIds, ...autoAchIds]);
+    const achievements = [...allAchIds].map(id => ({
+      ...getAchievement(id),
+      manual: manualAchIds.has(id),
+    }));
 
     res.json({
       ok: true,

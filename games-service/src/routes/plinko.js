@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { requireAuth, deductBalance, addBalance, recordStats } from '../middleware/auth.js';
 import { pushBigWin } from './drops.js';
+import { BIG_WIN_THRESHOLD } from '../constants/index.js';
 
 const router = Router();
 
@@ -27,14 +28,14 @@ function popcount(x) {
 }
 
 function getTable(rows, difficulty) {
-  return TABLES[`${difficulty.toUpperCase()}:${rows}`] ?? null;
+  return TABLES[`${String(difficulty).toUpperCase()}:${rows}`] ?? null;
 }
 
 // GET /api/v1/games/plinko/game/multipliers?rows=X&difficulty=Y
 router.get('/game/multipliers', (req, res) => {
-  const rows = parseInt(req.query.rows);
+  const rows       = parseInt(req.query.rows);
   const difficulty = String(req.query.difficulty || '').toUpperCase();
-  const table = getTable(rows, difficulty);
+  const table      = getTable(rows, difficulty);
   if (!table) return res.status(400).json({ ok: false, error: 'Invalid rows or difficulty' });
   res.json(table);
 });
@@ -44,7 +45,7 @@ router.post('/game/play', requireAuth, async (req, res) => {
   const { bet, balls, rows, difficulty } = req.body;
 
   if (!bet || bet <= 0) return res.status(400).json({ ok: false, error: 'Invalid bet' });
-  const n = Math.max(1, Math.min(100, parseInt(balls) || 1));
+  const n     = Math.max(1, Math.min(100, parseInt(balls) || 1));
   const table = getTable(rows, difficulty);
   if (!table) return res.status(400).json({ ok: false, error: 'Invalid rows or difficulty' });
 
@@ -63,9 +64,9 @@ router.post('/game/play', requireAuth, async (req, res) => {
     for (let r = 0; r < rows; r++) {
       if (Math.random() < 0.5) mask |= (1 << r);
     }
-    const landing = popcount(mask);
+    const landing    = popcount(mask);
     const multiplier = table[landing] ?? 0;
-    const win = parseFloat((bet * multiplier).toFixed(2));
+    const win        = parseFloat((bet * multiplier).toFixed(2));
     traces.push({ win, mask });
     totalWin = parseFloat((totalWin + win).toFixed(2));
   }
@@ -73,7 +74,7 @@ router.post('/game/play', requireAuth, async (req, res) => {
   if (totalWin > 0) await addBalance(req.user.id, totalWin);
   recordStats(req.user.id, 'plinko', totalBet, totalWin);
 
-  if (totalBet > 0 && totalWin >= totalBet * 20) {
+  if (totalBet > 0 && totalWin >= totalBet * BIG_WIN_THRESHOLD) {
     pushBigWin({ nick: req.user.nickname, game: 'Plinko', amount: totalWin, mult: totalWin / totalBet });
   }
 

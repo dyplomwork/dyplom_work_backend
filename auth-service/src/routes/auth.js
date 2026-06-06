@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import pool from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
+import { userDto } from '../utils/dto.js';
 
 const router = Router();
 
@@ -12,16 +13,6 @@ function makeToken(user) {
     process.env.JWT_SECRET,
     { expiresIn: '7d' }
   );
-}
-
-function userDto(row) {
-  return {
-    id: row.id,
-    nickname: row.nickname,
-    role: row.role,
-    balance: parseFloat(row.balance),
-    avatar_url: row.avatar_url ?? null,
-  };
 }
 
 // POST /api/v1/accounts/auth/register
