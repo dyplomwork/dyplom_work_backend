@@ -1,7 +1,6 @@
 import { Router } from 'express';
 import pool from '../db.js';
 import { requireAdmin } from '../middleware/auth.js';
-import { ticketDto } from './tickets.js';
 
 const router = Router();
 
@@ -85,20 +84,56 @@ router.get('/users/:id', requireAdmin, async (req, res) => {
     const { rows } = await pool.query(`SELECT * FROM users WHERE id = $1`, [req.params.id]);
     if (!rows[0]) return res.status(404).json({ ok: false, error: 'User not found' });
 
-    const [statsRes, clickerRes, itemsRes, achRes] = await Promise.all([
+    const MYTHIC_IDS = ['divine_relic', 'cosmos_gem'];
+    const [statsRes, clickerRes, itemsRes, achRes, mythicRes] = await Promise.all([
       pool.query(`SELECT * FROM game_stats WHERE user_id = $1`, [req.params.id]),
-      pool.query(`SELECT coins, click_power, auto_power FROM clicker_state WHERE user_id = $1`, [req.params.id]),
+      pool.query(`SELECT coins, click_power, auto_power FROM clicker_state WHERE user_id = $1`, [req.params.id]).catch(() => ({ rows: [] })),
       pool.query(`SELECT item_def_id, COUNT(*) as cnt FROM items WHERE user_id = $1 GROUP BY item_def_id ORDER BY cnt DESC LIMIT 20`, [req.params.id]),
       pool.query(`SELECT achievement_id, granted_at FROM user_achievements WHERE user_id = $1 ORDER BY granted_at DESC`, [req.params.id]),
+      pool.query(`SELECT COUNT(*) as cnt FROM items WHERE user_id = $1 AND item_def_id = ANY($2::text[])`, [req.params.id, MYTHIC_IDS]).catch(() => ({ rows: [{ cnt: 0 }] })),
     ]);
+
+    // Compute auto achievements from stats
+    const manualAchIds = new Set(achRes.rows.map(r => r.achievement_id));
+    let totalGames = 0, totalWagered = 0, biggestWin = 0, totalWon = 0;
+    for (const r of statsRes.rows) {
+      totalGames += parseInt(r.games_played);
+      totalWagered += parseFloat(r.total_wagered);
+      totalWon += parseFloat(r.total_won);
+      biggestWin = Math.max(biggestWin, parseFloat(r.biggest_win));
+    }
+    const totalItems = itemsRes.rows.reduce((s, r) => s + parseInt(r.cnt), 0);
+    const mythicCount = parseInt(mythicRes.rows[0]?.cnt ?? 0);
+    const clicker = clickerRes.rows[0];
+    const clickPower = Number(clicker?.click_power ?? 0);
+    const autoPower = Number(clicker?.auto_power ?? 0);
+    const balance = parseFloat(rows[0].balance ?? 0);
+
+    const computedAchIds = new Set();
+    if (mythicCount > 0) computedAchIds.add('mythic_hunter');
+    if (biggestWin >= 1000000) computedAchIds.add('millionaire');
+    else if (biggestWin >= 100000) computedAchIds.add('big_winner');
+    if (totalItems >= 50) computedAchIds.add('collector_pro');
+    else if (totalItems >= 10) computedAchIds.add('collector');
+    if (totalGames >= 100) computedAchIds.add('veteran');
+    if (clickPower >= 50) computedAchIds.add('click_master');
+    if (autoPower >= 30) computedAchIds.add('auto_master');
+    if (balance >= 500000) computedAchIds.add('rich');
+    if (totalWagered >= 1000000) computedAchIds.add('high_roller');
+
+    const allAchIds = new Set([...manualAchIds, ...computedAchIds]);
+    const achievements = [...allAchIds].map(id => {
+      const def = ALL_ACHIEVEMENTS.find(a => a.id === id) ?? { id, icon: '🏅', name: id, nameUa: id, rarity: 'common' };
+      return { ...def, manual: manualAchIds.has(id) };
+    });
 
     res.json({
       ok: true,
       user: userDto(rows[0]),
-      clicker: clickerRes.rows[0] ? {
-        coins: Number(clickerRes.rows[0].coins),
-        clickPower: Number(clickerRes.rows[0].click_power),
-        autoPower: Number(clickerRes.rows[0].auto_power),
+      clicker: clicker ? {
+        coins: Number(clicker.coins),
+        clickPower: Number(clicker.click_power),
+        autoPower: Number(clicker.auto_power),
       } : null,
       stats: statsRes.rows.map(r => ({
         gameType: r.game_type,
@@ -108,7 +143,7 @@ router.get('/users/:id', requireAdmin, async (req, res) => {
         biggestWin: parseFloat(r.biggest_win),
       })),
       inventory: itemsRes.rows.map(r => ({ itemDefId: r.item_def_id, count: parseInt(r.cnt) })),
-      achievements: achRes.rows.map(r => r.achievement_id),
+      achievements,
     });
   } catch (err) {
     console.error(err);
@@ -245,62 +280,14 @@ router.delete('/users/:id/achievement/:achId', requireAdmin, async (req, res) =>
   }
 });
 
-// ── Tickets ────────────────────────────────────────────────────────────
-
-// GET /api/v1/admin/tickets
-router.get('/tickets', requireAdmin, async (req, res) => {
-  try {
-    const { rows } = await pool.query(
-      `SELECT t.*, u.nickname, u.discord FROM tickets t
-       JOIN users u ON u.id = t.user_id
-       ORDER BY t.created_at DESC LIMIT 200`
-    );
-    res.json({ ok: true, ticket: rows.map(ticketDto) });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ ok: false, error: 'Internal server error' });
-  }
-});
-
-// PATCH /api/v1/admin/tickets/:id
-router.patch('/tickets/:id', requireAdmin, async (req, res) => {
-  const { status, note } = req.body;
-  if (!['APPROVED', 'REJECTED'].includes(status)) {
-    return res.status(400).json({ ok: false, error: 'status must be APPROVED or REJECTED' });
-  }
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    const { rows } = await client.query(
-      `UPDATE tickets SET status = $1, note = $2, resolved_at = NOW()
-       WHERE id = $3 AND status = 'PENDING' RETURNING *`,
-      [status, note ?? null, req.params.id]
-    );
-    if (!rows[0]) { await client.query('ROLLBACK'); return res.status(404).json({ ok: false, error: 'Ticket not found or already resolved' }); }
-    const ticket = rows[0];
-    if (status === 'APPROVED') {
-      const delta = ticket.type === 'DEPOSIT' ? ticket.amount : -ticket.amount;
-      await client.query(`UPDATE users SET balance = balance + $1 WHERE id = $2`, [delta, ticket.user_id]);
-    }
-    await client.query('COMMIT');
-    res.json({ ok: true });
-  } catch (err) {
-    await client.query('ROLLBACK');
-    console.error(err);
-    res.status(500).json({ ok: false, error: 'Internal server error' });
-  } finally {
-    client.release();
-  }
-});
-
 // ── Dashboard ──────────────────────────────────────────────────────────
 
 // GET /api/v1/admin/dashboard
 router.get('/dashboard', requireAdmin, async (req, res) => {
   try {
-    const [usersRes, ticketsRes, statsRes, topBalanceRes] = await Promise.all([
+    const [usersRes, itemsRes, statsRes, topBalanceRes] = await Promise.all([
       pool.query(`SELECT COUNT(*) as total, COUNT(*) FILTER (WHERE role='admin') as admins FROM users`),
-      pool.query(`SELECT COUNT(*) FILTER (WHERE status='PENDING') as pending, COUNT(*) as total FROM tickets`),
+      pool.query(`SELECT COUNT(*) as total FROM items`),
       pool.query(`SELECT SUM(total_wagered) as wagered, SUM(total_won) as won, MAX(biggest_win) as biggest FROM game_stats`),
       pool.query(`SELECT nickname, balance FROM users ORDER BY balance DESC LIMIT 5`),
     ]);
@@ -309,8 +296,7 @@ router.get('/dashboard', requireAdmin, async (req, res) => {
       dashboard: {
         totalUsers: parseInt(usersRes.rows[0].total),
         adminCount: parseInt(usersRes.rows[0].admins),
-        pendingTickets: parseInt(ticketsRes.rows[0].pending),
-        totalTickets: parseInt(ticketsRes.rows[0].total),
+        totalItems: parseInt(itemsRes.rows[0].total),
         totalWagered: parseFloat(statsRes.rows[0].wagered ?? 0),
         totalWon: parseFloat(statsRes.rows[0].won ?? 0),
         biggestWin: parseFloat(statsRes.rows[0].biggest ?? 0),

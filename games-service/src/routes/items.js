@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import pool from '../db.js';
-import { requireAuth } from '../middleware/auth.js';
-import { ITEM_DEFS } from '../itemDefs.js';
+import { requireAuth, addBalance } from '../middleware/auth.js';
+import { ITEM_DEFS, getItemDef } from '../itemDefs.js';
 
 const router = Router();
 
@@ -42,6 +42,36 @@ router.get('/me', requireAuth, async (req, res) => {
       ok: true,
       items: rows.map(r => ({ ...itemDto(r), listingId: r.listing_id ?? null })),
     });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ ok: false, error: 'Internal server error' });
+  }
+});
+
+// POST /api/v1/items/:itemId/sell-vendor — sell item to vendor at 50% base value
+router.post('/:itemId/sell-vendor', requireAuth, async (req, res) => {
+  try {
+    // Check item exists and belongs to this user
+    const { rows } = await pool.query(
+      `SELECT i.* FROM items i
+       LEFT JOIN auction_listings al ON al.item_id = i.id AND al.status = 'ACTIVE'
+       WHERE i.id = $1 AND i.user_id = $2`,
+      [req.params.itemId, req.user.id]
+    );
+    if (!rows[0]) return res.status(404).json({ ok: false, error: 'Item not found or not yours' });
+
+    const item = rows[0];
+    const def = getItemDef(item.item_def_id);
+    const baseValue = def?.value ?? 0;
+    const sellPrice = Math.floor(baseValue * 0.5);
+
+    if (sellPrice <= 0) return res.status(400).json({ ok: false, error: 'Item has no sell value' });
+
+    // Delete item and credit balance atomically
+    await pool.query(`DELETE FROM items WHERE id = $1`, [item.id]);
+    const newBalance = await addBalance(req.user.id, sellPrice);
+
+    res.json({ ok: true, gained: sellPrice, balance: newBalance });
   } catch (err) {
     console.error(err);
     res.status(500).json({ ok: false, error: 'Internal server error' });

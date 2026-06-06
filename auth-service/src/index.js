@@ -2,7 +2,6 @@ import express from 'express';
 import { initDb } from './db.js';
 import { requireAuth } from './middleware/auth.js';
 import authRouter from './routes/auth.js';
-import ticketsRouter from './routes/tickets.js';
 import adminRouter from './routes/admin.js';
 import statsRouter from './routes/stats.js';
 import pool from './db.js';
@@ -11,7 +10,6 @@ const app = express();
 app.use(express.json());
 
 app.use('/api/v1/accounts', authRouter);
-app.use('/api/v1/tickets', ticketsRouter);
 app.use('/api/v1/admin', adminRouter);
 app.use('/api/v1/stats', statsRouter);
 

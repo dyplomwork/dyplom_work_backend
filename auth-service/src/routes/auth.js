@@ -18,7 +18,6 @@ function userDto(row) {
   return {
     id: row.id,
     nickname: row.nickname,
-    discord: row.discord,
     role: row.role,
     balance: parseFloat(row.balance),
   };
@@ -26,21 +25,21 @@ function userDto(row) {
 
 // POST /api/v1/accounts/auth/register
 router.post('/auth/register', async (req, res) => {
-  const { nickname, discord, password } = req.body;
-  if (!nickname || !discord || !password) {
-    return res.status(400).json({ ok: false, error: 'nickname, discord and password are required' });
+  const { nickname, password } = req.body;
+  if (!nickname || !password) {
+    return res.status(400).json({ ok: false, error: 'nickname and password are required' });
   }
   try {
     const hash = await bcrypt.hash(password, 10);
     const { rows } = await pool.query(
-      `INSERT INTO users (nickname, discord, password_hash) VALUES ($1, $2, $3) RETURNING *`,
-      [nickname.trim(), discord.trim(), hash]
+      `INSERT INTO users (nickname, password_hash) VALUES ($1, $2) RETURNING *`,
+      [nickname.trim(), hash]
     );
     const user = rows[0];
     res.status(201).json({ ok: true, token: makeToken(user), user: userDto(user) });
   } catch (err) {
     if (err.code === '23505') {
-      return res.status(409).json({ ok: false, error: 'nickname or discord already taken' });
+      return res.status(409).json({ ok: false, error: 'Нікнейм вже зайнятий' });
     }
     console.error(err);
     res.status(500).json({ ok: false, error: 'Internal server error' });
@@ -55,7 +54,7 @@ router.post('/auth/login', async (req, res) => {
   }
   try {
     const { rows } = await pool.query(
-      `SELECT * FROM users WHERE nickname = $1 OR discord = $1`,
+      `SELECT * FROM users WHERE nickname = $1`,
       [login.trim()]
     );
     const user = rows[0];
@@ -89,11 +88,59 @@ router.get('/users/me', requireAuth, async (req, res) => {
 // GET /api/v1/accounts/users/me/balance
 router.get('/users/me/balance', requireAuth, async (req, res) => {
   try {
-    const { rows } = await pool.query(`SELECT balance FROM users WHERE id = $1`, [req.user.id]);
+    // Also return role so client can react to admin role changes without re-login
+    const { rows } = await pool.query(`SELECT balance, role, nickname FROM users WHERE id = $1`, [req.user.id]);
     if (!rows[0]) return res.status(404).json({ ok: false, error: 'User not found' });
-    res.json({ ok: true, balance: parseFloat(rows[0].balance) });
+    res.json({ ok: true, balance: parseFloat(rows[0].balance), role: rows[0].role, nickname: rows[0].nickname });
   } catch (err) {
     console.error(err);
+    res.status(500).json({ ok: false, error: 'Internal server error' });
+  }
+});
+
+// POST /api/v1/accounts/auth/google — Google OAuth sign-in / sign-up
+router.post('/auth/google', async (req, res) => {
+  const { idToken } = req.body;
+  if (!idToken) return res.status(400).json({ ok: false, error: 'idToken required' });
+
+  try {
+    // Verify Google ID token via Google's tokeninfo endpoint (no extra library needed)
+    const gRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`);
+    const payload = await gRes.json();
+
+    if (!gRes.ok || payload.error) {
+      return res.status(401).json({ ok: false, error: 'Invalid Google token' });
+    }
+
+    // Optional audience check
+    const clientId = process.env.GOOGLE_CLIENT_ID;
+    if (clientId && payload.aud !== clientId) {
+      return res.status(401).json({ ok: false, error: 'Token audience mismatch' });
+    }
+
+    const googleSub = payload.sub;
+    const rawName  = payload.name || payload.email?.split('@')[0] || `user${googleSub.slice(-6)}`;
+
+    // Find existing user by google_sub
+    let { rows } = await pool.query(`SELECT * FROM users WHERE google_sub = $1`, [googleSub]);
+    let user = rows[0];
+
+    if (!user) {
+      // New Google user — generate a unique nickname
+      let base = rawName.replace(/[^\w\-\.а-яА-ЯёЁіїєІЇЄ]/gu, '').slice(0, 40) || `g${googleSub.slice(-8)}`;
+      const { rows: taken } = await pool.query(`SELECT id FROM users WHERE nickname = $1`, [base]);
+      if (taken.length > 0) base = `${base}_${googleSub.slice(-4)}`;
+
+      const { rows: created } = await pool.query(
+        `INSERT INTO users (nickname, password_hash, google_sub) VALUES ($1, '', $2) RETURNING *`,
+        [base, googleSub]
+      );
+      user = created[0];
+    }
+
+    res.json({ ok: true, token: makeToken(user), user: userDto(user) });
+  } catch (err) {
+    console.error('[Google OAuth]', err);
     res.status(500).json({ ok: false, error: 'Internal server error' });
   }
 });
