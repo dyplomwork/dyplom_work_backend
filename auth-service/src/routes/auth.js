@@ -20,6 +20,7 @@ function userDto(row) {
     nickname: row.nickname,
     role: row.role,
     balance: parseFloat(row.balance),
+    avatar_url: row.avatar_url ?? null,
   };
 }
 
@@ -132,10 +133,17 @@ router.post('/auth/google', async (req, res) => {
       if (taken.length > 0) base = `${base}_${googleSub.slice(-4)}`;
 
       const { rows: created } = await pool.query(
-        `INSERT INTO users (nickname, password_hash, google_sub) VALUES ($1, '', $2) RETURNING *`,
-        [base, googleSub]
+        `INSERT INTO users (nickname, password_hash, google_sub, avatar_url) VALUES ($1, '', $2, $3) RETURNING *`,
+        [base, googleSub, payload.picture ?? null]
       );
       user = created[0];
+    } else if (payload.picture && !user.avatar_url) {
+      // Existing Google user — update avatar if they don't have one yet
+      const { rows: updated } = await pool.query(
+        `UPDATE users SET avatar_url = $1 WHERE id = $2 RETURNING *`,
+        [payload.picture, user.id]
+      );
+      user = updated[0];
     }
 
     res.json({ ok: true, token: makeToken(user), user: userDto(user) });
@@ -145,16 +153,37 @@ router.post('/auth/google', async (req, res) => {
   }
 });
 
-// PATCH /api/v1/accounts/users/me — change nickname
+// PATCH /api/v1/accounts/users/me — change nickname and/or avatar_url
 router.patch('/users/me', requireAuth, async (req, res) => {
-  const { nickname } = req.body;
-  if (!nickname?.trim() || nickname.trim().length < 3 || nickname.trim().length > 50) {
-    return res.status(400).json({ ok: false, error: 'Nickname must be 3-50 characters' });
+  const { nickname, avatar_url } = req.body;
+
+  const updates = [];
+  const values = [];
+
+  if (nickname !== undefined) {
+    if (!nickname?.trim() || nickname.trim().length < 3 || nickname.trim().length > 50) {
+      return res.status(400).json({ ok: false, error: 'Nickname must be 3-50 characters' });
+    }
+    updates.push(`nickname = $${values.length + 1}`);
+    values.push(nickname.trim());
   }
+
+  if (avatar_url !== undefined) {
+    // null or empty string clears the avatar
+    updates.push(`avatar_url = $${values.length + 1}`);
+    values.push(avatar_url || null);
+  }
+
+  if (updates.length === 0) {
+    return res.status(400).json({ ok: false, error: 'Nothing to update' });
+  }
+
+  values.push(req.user.id);
+
   try {
     const { rows } = await pool.query(
-      `UPDATE users SET nickname = $1 WHERE id = $2 RETURNING *`,
-      [nickname.trim(), req.user.id]
+      `UPDATE users SET ${updates.join(', ')} WHERE id = $${values.length} RETURNING *`,
+      values
     );
     if (!rows[0]) return res.status(404).json({ ok: false, error: 'User not found' });
     res.json({ ok: true, user: userDto(rows[0]) });

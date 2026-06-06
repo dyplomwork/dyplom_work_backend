@@ -40,6 +40,7 @@ export async function initDb() {
   await pool.query(`ALTER TABLE users ALTER COLUMN discord DROP NOT NULL`).catch(() => {});
   await pool.query(`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_discord_key`).catch(() => {});
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS google_sub TEXT UNIQUE`).catch(() => {});
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT`).catch(() => {});
 
   // Seed default admin account (login: Admin / password: admin)
   const { rows } = await pool.query(`SELECT id FROM users WHERE nickname = 'Admin'`);
