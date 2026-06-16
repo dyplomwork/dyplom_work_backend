@@ -6,32 +6,37 @@ const router = Router();
 
 function ticketDto(row) {
   return {
-    id: Number(row.id),
-    ownerId: row.user_id,
+    id: String(row.id),
+    userId: row.user_id,
+    nickname: row.nickname ?? null,
     type: row.type,
     amount: parseFloat(row.amount),
     status: row.status,
     note: row.note ?? null,
-    nickname: row.nickname ?? null,
-    discord: row.discord ?? null,
     createdAt: row.created_at,
-    closedAt: row.resolved_at ?? null,
+    resolvedAt: row.resolved_at ?? null,
   };
 }
 
 // POST /api/v1/tickets/me — create deposit or withdraw request
 router.post('/me', requireAuth, async (req, res) => {
-  const { type, amount } = req.body;
+  const { type } = req.body;
+  const amount = Number(req.body.amount);
   if (!['DEPOSIT', 'WITHDRAW'].includes(type)) {
     return res.status(400).json({ ok: false, error: 'type must be DEPOSIT or WITHDRAW' });
   }
-  if (!amount || amount <= 0) {
+  if (!Number.isFinite(amount) || amount <= 0) {
     return res.status(400).json({ ok: false, error: 'amount must be positive' });
   }
   try {
     if (type === 'WITHDRAW') {
-      const { rows } = await pool.query(`SELECT balance FROM users WHERE id = $1`, [req.user.id]);
-      if (parseFloat(rows[0]?.balance ?? 0) < amount) {
+      // Atomically reserve the funds so a user cannot queue withdrawals that
+      // together exceed their balance. Refunded if the request is rejected.
+      const { rows } = await pool.query(
+        `UPDATE users SET balance = balance - $1 WHERE id = $2 AND balance >= $1 RETURNING balance`,
+        [amount, req.user.id]
+      );
+      if (!rows[0]) {
         return res.status(400).json({ ok: false, error: 'Insufficient balance' });
       }
     }

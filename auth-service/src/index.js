@@ -4,7 +4,16 @@ import { requireAuth } from './middleware/auth.js';
 import authRouter from './routes/auth.js';
 import adminRouter from './routes/admin.js';
 import statsRouter from './routes/stats.js';
+import ticketsRouter from './routes/tickets.js';
+import donationsRouter from './routes/donations.js';
 import pool from './db.js';
+
+// Fail fast if the JWT signing secret is missing — never run with an undefined
+// secret (jwt.sign would throw per-request and tokens could not be verified).
+if (!process.env.JWT_SECRET) {
+  console.error('FATAL: JWT_SECRET environment variable is required');
+  process.exit(1);
+}
 
 const app = express();
 app.use(express.json());
@@ -12,25 +21,8 @@ app.use(express.json());
 app.use('/api/v1/accounts', authRouter);
 app.use('/api/v1/admin', adminRouter);
 app.use('/api/v1/stats', statsRouter);
-
-// POST /api/balance/apply
-app.post('/api/balance/apply', requireAuth, async (req, res) => {
-  const { delta } = req.body;
-  if (typeof delta !== 'number') {
-    return res.status(400).json({ ok: false, error: 'delta must be a number' });
-  }
-  try {
-    const { rows } = await pool.query(
-      `UPDATE users SET balance = balance + $1 WHERE id = $2 RETURNING balance`,
-      [delta, req.user.id]
-    );
-    if (!rows[0]) return res.status(404).json({ ok: false, error: 'User not found' });
-    res.json({ ok: true, balance: parseFloat(rows[0].balance) });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ ok: false, error: 'Internal server error' });
-  }
-});
+app.use('/api/v1/tickets', ticketsRouter);
+app.use('/api/v1/donations', donationsRouter);
 
 // GET /api/me — alias
 app.get('/api/me', requireAuth, async (req, res) => {

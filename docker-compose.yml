@@ -14,21 +14,25 @@ services:
   postgres:
     image: postgres:15-alpine
     environment:
-      POSTGRES_USER: casino_admin
-      POSTGRES_PASSWORD: casino_password
-      POSTGRES_DB: casino_db
+      POSTGRES_USER: ${POSTGRES_USER:-casino_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dev_only_change_me}
+      POSTGRES_DB: ${POSTGRES_DB:-casino_db}
     ports:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
 
+  # Secrets are read from a local .env file (see .env.example). The :- values are
+  # insecure DEV-ONLY defaults; production (Railway) must supply real env vars.
   auth-service:
     build: ./auth-service
     environment:
       - PORT=5001
-      - DATABASE_URL=postgresql://casino_admin:casino_password@postgres:5432/casino_db
-      - JWT_SECRET=supersecretjwtkey_casino_2025
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-casino_admin}:${POSTGRES_PASSWORD:-dev_only_change_me}@postgres:5432/${POSTGRES_DB:-casino_db}
+      - JWT_SECRET=${JWT_SECRET:-dev_only_insecure_secret_change_me}
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - SEED_DEFAULT_ADMIN=${SEED_DEFAULT_ADMIN:-true}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin}
     ports:
       - "5001:5001"
     depends_on:
@@ -38,8 +42,8 @@ services:
     build: ./games-service
     environment:
       - PORT=5002
-      - DATABASE_URL=postgresql://casino_admin:casino_password@postgres:5432/casino_db
-      - JWT_SECRET=supersecretjwtkey_casino_2025
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-casino_admin}:${POSTGRES_PASSWORD:-dev_only_change_me}@postgres:5432/${POSTGRES_DB:-casino_db}
+      - JWT_SECRET=${JWT_SECRET:-dev_only_insecure_secret_change_me}
       - AUTH_SERVICE_URL=http://auth-service:5001
     ports:
       - "5002:5002"

@@ -34,6 +34,18 @@ export async function initDb() {
       granted_by UUID REFERENCES users(id),
       PRIMARY KEY (user_id, achievement_id)
     );
+
+    CREATE TABLE IF NOT EXISTS donations (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      package_id VARCHAR(40) NOT NULL,
+      amount_usd NUMERIC(10,2) NOT NULL,
+      coins_credited NUMERIC(20,2) NOT NULL,
+      idempotency_key TEXT UNIQUE,
+      payment_token_hash TEXT,
+      status VARCHAR(20) NOT NULL DEFAULT 'COMPLETED',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
   `);
 
   // Idempotent schema migrations
@@ -42,17 +54,25 @@ export async function initDb() {
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS google_sub TEXT UNIQUE`).catch(() => {});
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT`).catch(() => {});
 
-  // Seed default admin account (login: Admin / password: admin)
-  const { rows } = await pool.query(`SELECT id FROM users WHERE nickname = 'Admin'`);
-  if (rows.length === 0) {
-    const hash = await bcrypt.hash('admin', 10);
-    await pool.query(
-      `INSERT INTO users (nickname, discord, password_hash, role, balance)
-       VALUES ('Admin', 'Admin#0000', $1, 'admin', 0)
-       ON CONFLICT DO NOTHING`,
-      [hash]
-    );
-    console.log('✓ Default admin created: nickname=Admin password=admin');
+  // Seed default admin account ONLY when explicitly enabled via env.
+  // Never ships an insecure default password — the password must be provided.
+  if (process.env.SEED_DEFAULT_ADMIN === 'true') {
+    const adminPassword = process.env.ADMIN_PASSWORD;
+    if (!adminPassword) {
+      console.warn('⚠ SEED_DEFAULT_ADMIN=true but ADMIN_PASSWORD is not set — skipping admin seed');
+    } else {
+      const { rows } = await pool.query(`SELECT id FROM users WHERE nickname = 'Admin'`);
+      if (rows.length === 0) {
+        const hash = await bcrypt.hash(adminPassword, 10);
+        await pool.query(
+          `INSERT INTO users (nickname, password_hash, role, balance)
+           VALUES ('Admin', $1, 'admin', 0)
+           ON CONFLICT DO NOTHING`,
+          [hash]
+        );
+        console.log('✓ Default admin created: nickname=Admin (password from ADMIN_PASSWORD)');
+      }
+    }
   }
 }
 

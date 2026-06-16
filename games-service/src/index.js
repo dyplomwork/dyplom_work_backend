@@ -11,6 +11,12 @@ import auctionRouter from './routes/auction.js';
 import clickerRouter from './routes/clicker.js';
 import dropsRouter from './routes/drops.js';
 
+// Fail fast if the JWT secret is missing — it must match auth-service to verify tokens.
+if (!process.env.JWT_SECRET) {
+  console.error('FATAL: JWT_SECRET environment variable is required');
+  process.exit(1);
+}
+
 const app = express();
 app.use(express.json());
 

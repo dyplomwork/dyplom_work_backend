@@ -104,9 +104,14 @@ router.post('/auth/google', async (req, res) => {
       return res.status(401).json({ ok: false, error: 'Invalid Google token' });
     }
 
-    // Optional audience check
+    // Audience check is mandatory: without it, an ID token minted for ANY other
+    // Google app would be accepted here. Refuse to run sign-in if unconfigured.
     const clientId = process.env.GOOGLE_CLIENT_ID;
-    if (clientId && payload.aud !== clientId) {
+    if (!clientId) {
+      console.error('[Google OAuth] GOOGLE_CLIENT_ID is not configured');
+      return res.status(503).json({ ok: false, error: 'Google sign-in is not configured' });
+    }
+    if (payload.aud !== clientId) {
       return res.status(401).json({ ok: false, error: 'Token audience mismatch' });
     }
 

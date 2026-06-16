@@ -3,6 +3,7 @@ import pool from '../db.js';
 import { requireAdmin } from '../middleware/auth.js';
 import { ALL_ACHIEVEMENTS, MYTHIC_IDS, getAchievement } from '../constants/achievements.js';
 import { adminUserDto } from '../utils/dto.js';
+import { ticketDto } from './tickets.js';
 
 const router = Router();
 
@@ -251,6 +252,69 @@ router.delete('/users/:id/achievement/:achId', requireAdmin, async (req, res) =>
   } catch (err) {
     console.error(err);
     res.status(500).json({ ok: false, error: 'Internal server error' });
+  }
+});
+
+// ── Tickets (deposit / withdraw requests) ───────────────────────────────
+
+// GET /api/v1/admin/tickets — all tickets, pending first
+router.get('/tickets', requireAdmin, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT t.*, u.nickname FROM tickets t
+       JOIN users u ON u.id = t.user_id
+       ORDER BY (t.status = 'PENDING') DESC, t.created_at DESC
+       LIMIT 200`
+    );
+    res.json({ ok: true, tickets: rows.map(ticketDto) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ ok: false, error: 'Internal server error' });
+  }
+});
+
+// PATCH /api/v1/admin/tickets/:id — approve or reject a pending ticket
+router.patch('/tickets/:id', requireAdmin, async (req, res) => {
+  const { status, note } = req.body;
+  if (!['APPROVED', 'REJECTED'].includes(status)) {
+    return res.status(400).json({ ok: false, error: 'status must be APPROVED or REJECTED' });
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    // Lock the row so two admins cannot resolve the same ticket concurrently.
+    const { rows } = await client.query(`SELECT * FROM tickets WHERE id = $1 FOR UPDATE`, [req.params.id]);
+    const ticket = rows[0];
+    if (!ticket) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ ok: false, error: 'Ticket not found' });
+    }
+    if (ticket.status !== 'PENDING') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ ok: false, error: 'Ticket already resolved' });
+    }
+
+    // Balance effects. WITHDRAW funds were already reserved when the request
+    // was created, so approval needs no change; rejection refunds the reserve.
+    // DEPOSIT credits the balance only on approval.
+    if (status === 'APPROVED' && ticket.type === 'DEPOSIT') {
+      await client.query(`UPDATE users SET balance = balance + $1 WHERE id = $2`, [ticket.amount, ticket.user_id]);
+    } else if (status === 'REJECTED' && ticket.type === 'WITHDRAW') {
+      await client.query(`UPDATE users SET balance = balance + $1 WHERE id = $2`, [ticket.amount, ticket.user_id]);
+    }
+
+    const { rows: updated } = await client.query(
+      `UPDATE tickets SET status = $1, note = $2, resolved_at = NOW() WHERE id = $3 RETURNING *`,
+      [status, note ?? null, req.params.id]
+    );
+    await client.query('COMMIT');
+    res.json({ ok: true, ticket: ticketDto(updated[0]) });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error(err);
+    res.status(500).json({ ok: false, error: 'Internal server error' });
+  } finally {
+    client.release();
   }
 });
 
