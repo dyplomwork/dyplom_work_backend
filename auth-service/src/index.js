@@ -4,7 +4,6 @@ import { requireAuth } from './middleware/auth.js';
 import authRouter from './routes/auth.js';
 import adminRouter from './routes/admin.js';
 import statsRouter from './routes/stats.js';
-import ticketsRouter from './routes/tickets.js';
 import donationsRouter from './routes/donations.js';
 import pool from './db.js';
 
@@ -21,7 +20,6 @@ app.use(express.json());
 app.use('/api/v1/accounts', authRouter);
 app.use('/api/v1/admin', adminRouter);
 app.use('/api/v1/stats', statsRouter);
-app.use('/api/v1/tickets', ticketsRouter);
 app.use('/api/v1/donations', donationsRouter);
 
 // GET /api/me — alias

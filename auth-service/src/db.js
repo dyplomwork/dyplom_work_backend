@@ -16,17 +16,6 @@ export async function initDb() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
-    CREATE TABLE IF NOT EXISTS tickets (
-      id BIGSERIAL PRIMARY KEY,
-      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      type VARCHAR(20) NOT NULL,
-      amount NUMERIC(20,2) NOT NULL,
-      status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
-      note TEXT,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      resolved_at TIMESTAMPTZ
-    );
-
     CREATE TABLE IF NOT EXISTS user_achievements (
       user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       achievement_id VARCHAR(50) NOT NULL,

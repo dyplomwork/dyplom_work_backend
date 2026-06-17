@@ -3,7 +3,6 @@ import pool from '../db.js';
 import { requireAdmin } from '../middleware/auth.js';
 import { ALL_ACHIEVEMENTS, MYTHIC_IDS, getAchievement } from '../constants/achievements.js';
 import { adminUserDto } from '../utils/dto.js';
-import { ticketDto } from './tickets.js';
 
 const router = Router();
 
@@ -255,69 +254,6 @@ router.delete('/users/:id/achievement/:achId', requireAdmin, async (req, res) =>
   }
 });
 
-// ── Tickets (deposit / withdraw requests) ───────────────────────────────
-
-// GET /api/v1/admin/tickets — all tickets, pending first
-router.get('/tickets', requireAdmin, async (req, res) => {
-  try {
-    const { rows } = await pool.query(
-      `SELECT t.*, u.nickname FROM tickets t
-       JOIN users u ON u.id = t.user_id
-       ORDER BY (t.status = 'PENDING') DESC, t.created_at DESC
-       LIMIT 200`
-    );
-    res.json({ ok: true, tickets: rows.map(ticketDto) });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ ok: false, error: 'Internal server error' });
-  }
-});
-
-// PATCH /api/v1/admin/tickets/:id — approve or reject a pending ticket
-router.patch('/tickets/:id', requireAdmin, async (req, res) => {
-  const { status, note } = req.body;
-  if (!['APPROVED', 'REJECTED'].includes(status)) {
-    return res.status(400).json({ ok: false, error: 'status must be APPROVED or REJECTED' });
-  }
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    // Lock the row so two admins cannot resolve the same ticket concurrently.
-    const { rows } = await client.query(`SELECT * FROM tickets WHERE id = $1 FOR UPDATE`, [req.params.id]);
-    const ticket = rows[0];
-    if (!ticket) {
-      await client.query('ROLLBACK');
-      return res.status(404).json({ ok: false, error: 'Ticket not found' });
-    }
-    if (ticket.status !== 'PENDING') {
-      await client.query('ROLLBACK');
-      return res.status(400).json({ ok: false, error: 'Ticket already resolved' });
-    }
-
-    // Balance effects. WITHDRAW funds were already reserved when the request
-    // was created, so approval needs no change; rejection refunds the reserve.
-    // DEPOSIT credits the balance only on approval.
-    if (status === 'APPROVED' && ticket.type === 'DEPOSIT') {
-      await client.query(`UPDATE users SET balance = balance + $1 WHERE id = $2`, [ticket.amount, ticket.user_id]);
-    } else if (status === 'REJECTED' && ticket.type === 'WITHDRAW') {
-      await client.query(`UPDATE users SET balance = balance + $1 WHERE id = $2`, [ticket.amount, ticket.user_id]);
-    }
-
-    const { rows: updated } = await client.query(
-      `UPDATE tickets SET status = $1, note = $2, resolved_at = NOW() WHERE id = $3 RETURNING *`,
-      [status, note ?? null, req.params.id]
-    );
-    await client.query('COMMIT');
-    res.json({ ok: true, ticket: ticketDto(updated[0]) });
-  } catch (err) {
-    await client.query('ROLLBACK');
-    console.error(err);
-    res.status(500).json({ ok: false, error: 'Internal server error' });
-  } finally {
-    client.release();
-  }
-});
-
 // ── Dashboard ──────────────────────────────────────────────────────────
 
 // GET /api/v1/admin/dashboard
@@ -341,6 +277,68 @@ router.get('/dashboard', requireAdmin, async (req, res) => {
         topBalance: topBalanceRes.rows.map(r => ({ nickname: r.nickname, balance: parseFloat(r.balance) })),
       },
     });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ ok: false, error: 'Internal server error' });
+  }
+});
+
+// ── Analytics (game modes + drop distribution) ──────────────────────────
+
+const RARITY_ORDER = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'];
+
+// GET /api/v1/admin/analytics — platform-wide game and drop statistics
+router.get('/analytics', requireAdmin, async (req, res) => {
+  try {
+    const [gameRes, itemRes] = await Promise.all([
+      pool.query(
+        `SELECT game_type,
+                SUM(games_played)  AS games,
+                SUM(total_wagered) AS wagered,
+                SUM(total_won)     AS won,
+                MAX(biggest_win)   AS biggest
+         FROM game_stats GROUP BY game_type`
+      ),
+      pool.query(`SELECT item_def_id, COUNT(*) AS cnt FROM items GROUP BY item_def_id`),
+    ]);
+
+    // Per-game breakdown with house profit and RTP (return-to-player %)
+    const byGame = gameRes.rows.map(r => {
+      const wagered = parseFloat(r.wagered ?? 0);
+      const won = parseFloat(r.won ?? 0);
+      return {
+        gameType: r.game_type,
+        games:    parseInt(r.games),
+        wagered,
+        won,
+        profit:   parseFloat((wagered - won).toFixed(2)),       // house profit
+        rtp:      wagered > 0 ? parseFloat(((won / wagered) * 100).toFixed(2)) : 0,
+        biggest:  parseFloat(r.biggest ?? 0),
+      };
+    }).sort((a, b) => b.games - a.games);
+
+    // Drop distribution by rarity + most-dropped items
+    const rarityById = Object.fromEntries(ITEM_DEFS_LIST.map(d => [d.id, d.rarity]));
+    const metaById   = Object.fromEntries(ITEM_DEFS_LIST.map(d => [d.id, { name: d.name, icon: d.icon }]));
+    const rarityCount = Object.fromEntries(RARITY_ORDER.map(r => [r, 0]));
+    let totalItems = 0;
+    const topItems = [];
+    for (const row of itemRes.rows) {
+      const cnt = parseInt(row.cnt);
+      totalItems += cnt;
+      const rarity = rarityById[row.item_def_id] ?? 'common';
+      rarityCount[rarity] += cnt;
+      const meta = metaById[row.item_def_id] ?? { name: row.item_def_id, icon: '📦' };
+      topItems.push({ itemDefId: row.item_def_id, name: meta.name, icon: meta.icon, rarity, count: cnt });
+    }
+    topItems.sort((a, b) => b.count - a.count);
+    const byRarity = RARITY_ORDER.map(r => ({
+      rarity:  r,
+      count:   rarityCount[r],
+      percent: totalItems > 0 ? parseFloat(((rarityCount[r] / totalItems) * 100).toFixed(2)) : 0,
+    }));
+
+    res.json({ ok: true, analytics: { byGame, byRarity, topItems: topItems.slice(0, 15), totalItems } });
   } catch (err) {
     console.error(err);
     res.status(500).json({ ok: false, error: 'Internal server error' });
