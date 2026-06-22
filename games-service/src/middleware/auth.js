@@ -1,16 +1,35 @@
 import jwt from 'jsonwebtoken';
 import pool from '../db.js';
 
-export function requireAuth(req, res, next) {
+// Verifies the JWT, then checks live account state (exists / not banned /
+// token not invalidated) so a ban blocks gameplay immediately too.
+export async function requireAuth(req, res, next) {
   const header = req.headers.authorization;
   if (!header?.startsWith('Bearer ')) {
     return res.status(401).json({ ok: false, error: 'Unauthorized' });
   }
+  let payload;
   try {
-    req.user = jwt.verify(header.slice(7), process.env.JWT_SECRET);
-    next();
+    payload = jwt.verify(header.slice(7), process.env.JWT_SECRET);
   } catch {
-    res.status(401).json({ ok: false, error: 'Invalid token' });
+    return res.status(401).json({ ok: false, error: 'Invalid token' });
+  }
+  try {
+    const { rows } = await pool.query(
+      `SELECT status, token_version FROM users WHERE id = $1`,
+      [payload.id]
+    );
+    const u = rows[0];
+    if (!u) return res.status(401).json({ ok: false, error: 'Invalid token' });
+    if (u.status === 'banned') return res.status(403).json({ ok: false, error: 'Account banned' });
+    if (Number(payload.tv ?? 0) !== Number(u.token_version)) {
+      return res.status(401).json({ ok: false, error: 'Session expired' });
+    }
+    req.user = payload;
+    next();
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ ok: false, error: 'Internal server error' });
   }
 }
 

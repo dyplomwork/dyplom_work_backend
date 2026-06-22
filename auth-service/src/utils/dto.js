@@ -14,7 +14,7 @@ export function userDto(row) {
   };
 }
 
-/** Extended user DTO — used in admin panel (includes discord, createdAt) */
+/** Extended user DTO — used in admin panel (includes discord, status, createdAt) */
 export function adminUserDto(row) {
   return {
     id:         row.id,
@@ -23,6 +23,8 @@ export function adminUserDto(row) {
     role:       row.role,
     balance:    parseFloat(row.balance),
     avatar_url: row.avatar_url ?? null,
+    status:     row.status ?? 'active',
+    banReason:  row.ban_reason ?? null,
     createdAt:  row.created_at,
   };
 }

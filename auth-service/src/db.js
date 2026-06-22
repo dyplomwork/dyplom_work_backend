@@ -35,6 +35,18 @@ export async function initDb() {
       status VARCHAR(20) NOT NULL DEFAULT 'COMPLETED',
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+
+    CREATE TABLE IF NOT EXISTS admin_actions (
+      id BIGSERIAL PRIMARY KEY,
+      admin_id UUID,
+      admin_nick VARCHAR(50),
+      action VARCHAR(40) NOT NULL,
+      target_user_id UUID,
+      target_nick VARCHAR(50),
+      details JSONB,
+      reason TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
   `);
 
   // Idempotent schema migrations
@@ -42,6 +54,10 @@ export async function initDb() {
   await pool.query(`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_discord_key`).catch(() => {});
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS google_sub TEXT UNIQUE`).catch(() => {});
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT`).catch(() => {});
+  // Account status + token version (for ban/suspend with instant token invalidation)
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'active'`).catch(() => {});
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS token_version INT NOT NULL DEFAULT 0`).catch(() => {});
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS ban_reason TEXT`).catch(() => {});
 
   // Seed default admin account ONLY when explicitly enabled via env.
   // Never ships an insecure default password — the password must be provided.

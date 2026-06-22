@@ -28,19 +28,58 @@ const ITEM_DEFS_LIST = [
   { id: 'cosmos_gem',      name: 'Cosmos Gem',      icon: '🌌', rarity: 'mythic' },
 ];
 
+// Record an administrative action into the audit log (best-effort).
+async function logAction(req, action, target, details, reason) {
+  try {
+    await pool.query(
+      `INSERT INTO admin_actions (admin_id, admin_nick, action, target_user_id, target_nick, details, reason)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [req.user.id, req.user.nickname ?? null, action,
+       target?.id ?? null, target?.nick ?? null,
+       details ? JSON.stringify(details) : null, reason ?? null]
+    );
+  } catch (e) {
+    console.error('[audit]', e);
+  }
+}
+
 // ── Users ──────────────────────────────────────────────────────────────
 
-// GET /api/v1/admin/users
+// GET /api/v1/admin/users — server-side search / filter / pagination
 router.get('/users', requireAdmin, async (req, res) => {
   try {
+    const search = (req.query.search ?? '').toString().trim();
+    const role   = (req.query.role ?? '').toString();
+    const status = (req.query.status ?? '').toString();
+    const page     = Math.max(1, parseInt(req.query.page) || 1);
+    const pageSize = Math.min(100, Math.max(5, parseInt(req.query.pageSize) || 20));
+    const offset   = (page - 1) * pageSize;
+
+    const where = [];
+    const params = [];
+    if (search) { params.push(`%${search}%`); where.push(`u.nickname ILIKE $${params.length}`); }
+    if (role === 'user' || role === 'admin') { params.push(role); where.push(`u.role = $${params.length}`); }
+    if (status === 'active' || status === 'banned') { params.push(status); where.push(`u.status = $${params.length}`); }
+    const whereSql = where.length ? 'WHERE ' + where.join(' AND ') : '';
+
+    const totalRes = await pool.query(`SELECT COUNT(*) AS c FROM users u ${whereSql}`, params);
+    const total = parseInt(totalRes.rows[0].c);
+
+    const listParams = params.slice();
+    listParams.push(pageSize); const limIdx = listParams.length;
+    listParams.push(offset);   const offIdx = listParams.length;
     const { rows } = await pool.query(
       `SELECT u.*,
          (SELECT COUNT(*) FROM items WHERE user_id = u.id) as item_count,
          (SELECT COUNT(*) FROM user_achievements WHERE user_id = u.id) as ach_count
-       FROM users u ORDER BY u.created_at DESC`
+       FROM users u ${whereSql}
+       ORDER BY u.created_at DESC
+       LIMIT $${limIdx} OFFSET $${offIdx}`,
+      listParams
     );
     res.json({
       ok: true,
+      total, page, pageSize,
       users: rows.map(r => ({
         ...adminUserDto(r),
         itemCount: parseInt(r.item_count),
@@ -139,6 +178,8 @@ router.patch('/users/:id', requireAdmin, async (req, res) => {
       [nickname.trim(), role, balance, req.params.id]
     );
     if (!rows[0]) return res.status(404).json({ ok: false, error: 'User not found' });
+    await logAction(req, 'edit_user', { id: rows[0].id, nick: rows[0].nickname },
+      { nickname: nickname.trim(), role, balance: Number(balance) });
     res.json({ ok: true, user: adminUserDto(rows[0]) });
   } catch (err) {
     if (err.code === '23505') return res.status(409).json({ ok: false, error: 'Nickname already taken' });
@@ -153,8 +194,9 @@ router.delete('/users/:id', requireAdmin, async (req, res) => {
     return res.status(400).json({ ok: false, error: 'Cannot delete your own account' });
   }
   try {
-    const { rowCount } = await pool.query(`DELETE FROM users WHERE id = $1`, [req.params.id]);
-    if (!rowCount) return res.status(404).json({ ok: false, error: 'User not found' });
+    const { rows } = await pool.query(`DELETE FROM users WHERE id = $1 RETURNING nickname`, [req.params.id]);
+    if (!rows[0]) return res.status(404).json({ ok: false, error: 'User not found' });
+    await logAction(req, 'delete_user', { id: req.params.id, nick: rows[0].nickname });
     res.json({ ok: true });
   } catch (err) {
     console.error(err);
@@ -165,16 +207,57 @@ router.delete('/users/:id', requireAdmin, async (req, res) => {
 // POST /api/v1/admin/users/:id/give-balance
 router.post('/users/:id/give-balance', requireAdmin, async (req, res) => {
   const amount = Number(req.body.amount);
+  const reason = (req.body.reason ?? '').toString().slice(0, 500) || null;
   if (!Number.isFinite(amount) || amount === 0) {
     return res.status(400).json({ ok: false, error: 'Invalid amount' });
   }
   try {
     const { rows } = await pool.query(
-      `UPDATE users SET balance = GREATEST(0, balance + $1) WHERE id = $2 RETURNING balance`,
+      `UPDATE users SET balance = GREATEST(0, balance + $1) WHERE id = $2 RETURNING balance, nickname`,
       [amount, req.params.id]
     );
     if (!rows[0]) return res.status(404).json({ ok: false, error: 'User not found' });
+    await logAction(req, 'give_balance', { id: req.params.id, nick: rows[0].nickname },
+      { amount, balance: parseFloat(rows[0].balance) }, reason);
     res.json({ ok: true, balance: parseFloat(rows[0].balance) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ ok: false, error: 'Internal server error' });
+  }
+});
+
+// POST /api/v1/admin/users/:id/ban
+router.post('/users/:id/ban', requireAdmin, async (req, res) => {
+  if (req.params.id === req.user.id) {
+    return res.status(400).json({ ok: false, error: 'Cannot ban yourself' });
+  }
+  const reason = (req.body?.reason ?? '').toString().slice(0, 500) || null;
+  try {
+    // Bumping token_version invalidates all of the user's existing JWTs at once.
+    const { rows } = await pool.query(
+      `UPDATE users SET status = 'banned', ban_reason = $2, token_version = token_version + 1
+       WHERE id = $1 RETURNING *`,
+      [req.params.id, reason]
+    );
+    if (!rows[0]) return res.status(404).json({ ok: false, error: 'User not found' });
+    await logAction(req, 'ban', { id: rows[0].id, nick: rows[0].nickname }, null, reason);
+    res.json({ ok: true, user: adminUserDto(rows[0]) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ ok: false, error: 'Internal server error' });
+  }
+});
+
+// POST /api/v1/admin/users/:id/unban
+router.post('/users/:id/unban', requireAdmin, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `UPDATE users SET status = 'active', ban_reason = NULL WHERE id = $1 RETURNING *`,
+      [req.params.id]
+    );
+    if (!rows[0]) return res.status(404).json({ ok: false, error: 'User not found' });
+    await logAction(req, 'unban', { id: rows[0].id, nick: rows[0].nickname });
+    res.json({ ok: true, user: adminUserDto(rows[0]) });
   } catch (err) {
     console.error(err);
     res.status(500).json({ ok: false, error: 'Internal server error' });
@@ -187,12 +270,13 @@ router.post('/users/:id/give-item', requireAdmin, async (req, res) => {
   const valid = ITEM_DEFS_LIST.some(d => d.id === itemDefId);
   if (!valid) return res.status(400).json({ ok: false, error: 'Unknown item' });
   try {
-    const { rows: userRows } = await pool.query(`SELECT id FROM users WHERE id = $1`, [req.params.id]);
+    const { rows: userRows } = await pool.query(`SELECT id, nickname FROM users WHERE id = $1`, [req.params.id]);
     if (!userRows[0]) return res.status(404).json({ ok: false, error: 'User not found' });
     await pool.query(
       `INSERT INTO items (user_id, item_def_id, source) VALUES ($1, $2, 'admin')`,
       [req.params.id, itemDefId]
     );
+    await logAction(req, 'give_item', { id: req.params.id, nick: userRows[0].nickname }, { itemDefId });
     res.json({ ok: true });
   } catch (err) {
     console.error(err);
@@ -207,7 +291,7 @@ router.post('/users/:id/give-clicker-coins', requireAdmin, async (req, res) => {
     return res.status(400).json({ ok: false, error: 'Invalid amount' });
   }
   try {
-    const { rows: userRows } = await pool.query(`SELECT id FROM users WHERE id = $1`, [req.params.id]);
+    const { rows: userRows } = await pool.query(`SELECT id, nickname FROM users WHERE id = $1`, [req.params.id]);
     if (!userRows[0]) return res.status(404).json({ ok: false, error: 'User not found' });
     const { rows } = await pool.query(
       `INSERT INTO clicker_state (user_id, coins) VALUES ($1, $2)
@@ -215,6 +299,7 @@ router.post('/users/:id/give-clicker-coins', requireAdmin, async (req, res) => {
        RETURNING coins`,
       [req.params.id, amount]
     );
+    await logAction(req, 'give_coins', { id: req.params.id, nick: userRows[0].nickname }, { amount });
     res.json({ ok: true, coins: Number(rows[0].coins) });
   } catch (err) {
     console.error(err);
@@ -233,6 +318,7 @@ router.post('/users/:id/give-achievement', requireAdmin, async (req, res) => {
        ON CONFLICT (user_id, achievement_id) DO NOTHING`,
       [req.params.id, achievementId, req.user.id]
     );
+    await logAction(req, 'give_achievement', { id: req.params.id }, { achievementId });
     res.json({ ok: true });
   } catch (err) {
     console.error(err);
@@ -339,6 +425,77 @@ router.get('/analytics', requireAdmin, async (req, res) => {
     }));
 
     res.json({ ok: true, analytics: { byGame, byRarity, topItems: topItems.slice(0, 15), totalItems } });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ ok: false, error: 'Internal server error' });
+  }
+});
+
+// ── Audit log ───────────────────────────────────────────────────────────
+
+// GET /api/v1/admin/audit — recent administrative actions
+router.get('/audit', requireAdmin, async (req, res) => {
+  try {
+    const limit = Math.min(300, Math.max(1, parseInt(req.query.limit) || 100));
+    const { rows } = await pool.query(
+      `SELECT * FROM admin_actions ORDER BY created_at DESC LIMIT $1`,
+      [limit]
+    );
+    res.json({
+      ok: true,
+      actions: rows.map(r => ({
+        id: Number(r.id),
+        adminNick: r.admin_nick,
+        action: r.action,
+        targetNick: r.target_nick,
+        details: r.details,
+        reason: r.reason,
+        createdAt: r.created_at,
+      })),
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ ok: false, error: 'Internal server error' });
+  }
+});
+
+// ── Donations / revenue ───────────────────────────────────────────────────
+
+// GET /api/v1/admin/donations — all donations + revenue summary
+router.get('/donations', requireAdmin, async (req, res) => {
+  try {
+    const limit = Math.min(300, Math.max(1, parseInt(req.query.limit) || 100));
+    const [listRes, sumRes] = await Promise.all([
+      pool.query(
+        `SELECT d.*, u.nickname FROM donations d
+         JOIN users u ON u.id = d.user_id
+         ORDER BY d.created_at DESC LIMIT $1`,
+        [limit]
+      ),
+      pool.query(
+        `SELECT COUNT(*) AS cnt,
+                COALESCE(SUM(amount_usd), 0) AS usd,
+                COALESCE(SUM(coins_credited), 0) AS coins
+         FROM donations`
+      ),
+    ]);
+    res.json({
+      ok: true,
+      summary: {
+        count: parseInt(sumRes.rows[0].cnt),
+        revenueUsd: parseFloat(sumRes.rows[0].usd),
+        coinsCredited: parseFloat(sumRes.rows[0].coins),
+      },
+      donations: listRes.rows.map(d => ({
+        id: d.id,
+        nickname: d.nickname,
+        packageId: d.package_id,
+        amountUsd: parseFloat(d.amount_usd),
+        coinsCredited: parseFloat(d.coins_credited),
+        status: d.status,
+        createdAt: d.created_at,
+      })),
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ ok: false, error: 'Internal server error' });

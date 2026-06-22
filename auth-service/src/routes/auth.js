@@ -9,7 +9,7 @@ const router = Router();
 
 function makeToken(user) {
   return jwt.sign(
-    { id: user.id, nickname: user.nickname, role: user.role },
+    { id: user.id, nickname: user.nickname, role: user.role, tv: user.token_version ?? 0 },
     process.env.JWT_SECRET,
     { expiresIn: '7d' }
   );
@@ -52,6 +52,9 @@ router.post('/auth/login', async (req, res) => {
     const user = rows[0];
     if (!user || !(await bcrypt.compare(password, user.password_hash))) {
       return res.status(401).json({ ok: false, error: 'Invalid credentials' });
+    }
+    if (user.status === 'banned') {
+      return res.status(403).json({ ok: false, error: 'Account banned' });
     }
     res.json({ ok: true, token: makeToken(user), user: userDto(user) });
   } catch (err) {
@@ -121,6 +124,10 @@ router.post('/auth/google', async (req, res) => {
     // Find existing user by google_sub
     let { rows } = await pool.query(`SELECT * FROM users WHERE google_sub = $1`, [googleSub]);
     let user = rows[0];
+
+    if (user && user.status === 'banned') {
+      return res.status(403).json({ ok: false, error: 'Account banned' });
+    }
 
     if (!user) {
       // New Google user — generate a unique nickname
