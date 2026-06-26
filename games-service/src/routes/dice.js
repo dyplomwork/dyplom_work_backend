@@ -11,7 +11,6 @@ function calcDicePayout(rollOver) {
   return { winChancePercentage: winChance * 100, payout: parseFloat(multiplier.toFixed(4)) };
 }
 
-// GET /api/v1/games/dice/game/payout?rollOver=X
 router.get('/game/payout', (req, res) => {
   const rollOver = parseFloat(req.query.rollOver);
   if (!Number.isFinite(rollOver) || rollOver < 1 || rollOver > 98) {
@@ -20,7 +19,6 @@ router.get('/game/payout', (req, res) => {
   res.json(calcDicePayout(rollOver));
 });
 
-// POST /api/v1/games/dice/game/play
 router.post('/game/play', requireAuth, async (req, res) => {
   const bet     = Number(req.body.bet);
   const rollOver = Number(req.body.rollOver);

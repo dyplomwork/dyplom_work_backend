@@ -40,7 +40,6 @@ function resolveBet(key, number) {
   }
 }
 
-// POST /api/v1/games/roulette/game/play
 router.post('/game/play', requireAuth, async (req, res) => {
   const { bets } = req.body;
   if (!Array.isArray(bets) || bets.length === 0) {

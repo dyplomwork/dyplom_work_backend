@@ -49,18 +49,14 @@ export async function initDb() {
     );
   `);
 
-  // Idempotent schema migrations
   await pool.query(`ALTER TABLE users ALTER COLUMN discord DROP NOT NULL`).catch(() => {});
   await pool.query(`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_discord_key`).catch(() => {});
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS google_sub TEXT UNIQUE`).catch(() => {});
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT`).catch(() => {});
-  // Account status + token version (for ban/suspend with instant token invalidation)
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'active'`).catch(() => {});
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS token_version INT NOT NULL DEFAULT 0`).catch(() => {});
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS ban_reason TEXT`).catch(() => {});
 
-  // Seed default admin account ONLY when explicitly enabled via env.
-  // Never ships an insecure default password — the password must be provided.
   if (process.env.SEED_DEFAULT_ADMIN === 'true') {
     const adminPassword = process.env.ADMIN_PASSWORD;
     if (!adminPassword) {

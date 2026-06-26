@@ -6,8 +6,6 @@ import { adminUserDto } from '../utils/dto.js';
 
 const router = Router();
 
-// Item definitions list for admin panel (id + display fields only)
-// Full definitions with value/color live in games-service/itemDefs.js
 const ITEM_DEFS_LIST = [
   { id: 'bronze_shard',    name: 'Bronze Shard',    icon: '🪙', rarity: 'common' },
   { id: 'iron_nugget',     name: 'Iron Nugget',     icon: '⚙️', rarity: 'common' },
@@ -28,7 +26,6 @@ const ITEM_DEFS_LIST = [
   { id: 'cosmos_gem',      name: 'Cosmos Gem',      icon: '🌌', rarity: 'mythic' },
 ];
 
-// Record an administrative action into the audit log (best-effort).
 async function logAction(req, action, target, details, reason) {
   try {
     await pool.query(
@@ -43,9 +40,6 @@ async function logAction(req, action, target, details, reason) {
   }
 }
 
-// ── Users ──────────────────────────────────────────────────────────────
-
-// GET /api/v1/admin/users — server-side search / filter / pagination
 router.get('/users', requireAdmin, async (req, res) => {
   try {
     const search = (req.query.search ?? '').toString().trim();
@@ -92,7 +86,6 @@ router.get('/users', requireAdmin, async (req, res) => {
   }
 });
 
-// GET /api/v1/admin/users/:id — user detail
 router.get('/users/:id', requireAdmin, async (req, res) => {
   try {
     const { rows } = await pool.query(`SELECT * FROM users WHERE id = $1`, [req.params.id]);
@@ -106,7 +99,6 @@ router.get('/users/:id', requireAdmin, async (req, res) => {
       pool.query(`SELECT COUNT(*) as cnt FROM items WHERE user_id = $1 AND item_def_id = ANY($2::text[])`, [req.params.id, MYTHIC_IDS]).catch(() => ({ rows: [{ cnt: 0 }] })),
     ]);
 
-    // Compute auto achievements from stats
     const manualAchIds = new Set(achRes.rows.map(r => r.achievement_id));
     let totalGames = 0, totalWagered = 0, biggestWin = 0, totalWon = 0;
     for (const r of statsRes.rows) {
@@ -164,7 +156,6 @@ router.get('/users/:id', requireAdmin, async (req, res) => {
   }
 });
 
-// PATCH /api/v1/admin/users/:id — edit user
 router.patch('/users/:id', requireAdmin, async (req, res) => {
   const { nickname, role, balance } = req.body;
   if (!nickname?.trim()) return res.status(400).json({ ok: false, error: 'nickname required' });
@@ -188,7 +179,6 @@ router.patch('/users/:id', requireAdmin, async (req, res) => {
   }
 });
 
-// DELETE /api/v1/admin/users/:id
 router.delete('/users/:id', requireAdmin, async (req, res) => {
   if (req.params.id === req.user.id) {
     return res.status(400).json({ ok: false, error: 'Cannot delete your own account' });
@@ -204,7 +194,6 @@ router.delete('/users/:id', requireAdmin, async (req, res) => {
   }
 });
 
-// POST /api/v1/admin/users/:id/give-balance
 router.post('/users/:id/give-balance', requireAdmin, async (req, res) => {
   const amount = Number(req.body.amount);
   const reason = (req.body.reason ?? '').toString().slice(0, 500) || null;
@@ -226,14 +215,12 @@ router.post('/users/:id/give-balance', requireAdmin, async (req, res) => {
   }
 });
 
-// POST /api/v1/admin/users/:id/ban
 router.post('/users/:id/ban', requireAdmin, async (req, res) => {
   if (req.params.id === req.user.id) {
     return res.status(400).json({ ok: false, error: 'Cannot ban yourself' });
   }
   const reason = (req.body?.reason ?? '').toString().slice(0, 500) || null;
   try {
-    // Bumping token_version invalidates all of the user's existing JWTs at once.
     const { rows } = await pool.query(
       `UPDATE users SET status = 'banned', ban_reason = $2, token_version = token_version + 1
        WHERE id = $1 RETURNING *`,
@@ -248,7 +235,6 @@ router.post('/users/:id/ban', requireAdmin, async (req, res) => {
   }
 });
 
-// POST /api/v1/admin/users/:id/unban
 router.post('/users/:id/unban', requireAdmin, async (req, res) => {
   try {
     const { rows } = await pool.query(
@@ -264,7 +250,6 @@ router.post('/users/:id/unban', requireAdmin, async (req, res) => {
   }
 });
 
-// POST /api/v1/admin/users/:id/give-item
 router.post('/users/:id/give-item', requireAdmin, async (req, res) => {
   const { itemDefId } = req.body;
   const valid = ITEM_DEFS_LIST.some(d => d.id === itemDefId);
@@ -284,7 +269,6 @@ router.post('/users/:id/give-item', requireAdmin, async (req, res) => {
   }
 });
 
-// POST /api/v1/admin/users/:id/give-clicker-coins
 router.post('/users/:id/give-clicker-coins', requireAdmin, async (req, res) => {
   const amount = parseInt(req.body.amount);
   if (!Number.isFinite(amount) || amount === 0) {
@@ -307,7 +291,6 @@ router.post('/users/:id/give-clicker-coins', requireAdmin, async (req, res) => {
   }
 });
 
-// POST /api/v1/admin/users/:id/give-achievement
 router.post('/users/:id/give-achievement', requireAdmin, async (req, res) => {
   const { achievementId } = req.body;
   const valid = ALL_ACHIEVEMENTS.some(a => a.id === achievementId);
@@ -326,7 +309,6 @@ router.post('/users/:id/give-achievement', requireAdmin, async (req, res) => {
   }
 });
 
-// DELETE /api/v1/admin/users/:id/achievement/:achId
 router.delete('/users/:id/achievement/:achId', requireAdmin, async (req, res) => {
   try {
     await pool.query(
@@ -340,9 +322,6 @@ router.delete('/users/:id/achievement/:achId', requireAdmin, async (req, res) =>
   }
 });
 
-// ── Dashboard ──────────────────────────────────────────────────────────
-
-// GET /api/v1/admin/dashboard
 router.get('/dashboard', requireAdmin, async (req, res) => {
   try {
     const [usersRes, itemsRes, statsRes, topBalanceRes] = await Promise.all([
@@ -369,11 +348,8 @@ router.get('/dashboard', requireAdmin, async (req, res) => {
   }
 });
 
-// ── Analytics (game modes + drop distribution) ──────────────────────────
-
 const RARITY_ORDER = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'];
 
-// GET /api/v1/admin/analytics — platform-wide game and drop statistics
 router.get('/analytics', requireAdmin, async (req, res) => {
   try {
     const [gameRes, itemRes] = await Promise.all([
@@ -388,7 +364,6 @@ router.get('/analytics', requireAdmin, async (req, res) => {
       pool.query(`SELECT item_def_id, COUNT(*) AS cnt FROM items GROUP BY item_def_id`),
     ]);
 
-    // Per-game breakdown with house profit and RTP (return-to-player %)
     const byGame = gameRes.rows.map(r => {
       const wagered = parseFloat(r.wagered ?? 0);
       const won = parseFloat(r.won ?? 0);
@@ -397,13 +372,12 @@ router.get('/analytics', requireAdmin, async (req, res) => {
         games:    parseInt(r.games),
         wagered,
         won,
-        profit:   parseFloat((wagered - won).toFixed(2)),       // house profit
+        profit:   parseFloat((wagered - won).toFixed(2)),
         rtp:      wagered > 0 ? parseFloat(((won / wagered) * 100).toFixed(2)) : 0,
         biggest:  parseFloat(r.biggest ?? 0),
       };
     }).sort((a, b) => b.games - a.games);
 
-    // Drop distribution by rarity + most-dropped items
     const rarityById = Object.fromEntries(ITEM_DEFS_LIST.map(d => [d.id, d.rarity]));
     const metaById   = Object.fromEntries(ITEM_DEFS_LIST.map(d => [d.id, { name: d.name, icon: d.icon }]));
     const rarityCount = Object.fromEntries(RARITY_ORDER.map(r => [r, 0]));
@@ -431,9 +405,6 @@ router.get('/analytics', requireAdmin, async (req, res) => {
   }
 });
 
-// ── Audit log ───────────────────────────────────────────────────────────
-
-// GET /api/v1/admin/audit — recent administrative actions
 router.get('/audit', requireAdmin, async (req, res) => {
   try {
     const limit = Math.min(300, Math.max(1, parseInt(req.query.limit) || 100));
@@ -459,9 +430,6 @@ router.get('/audit', requireAdmin, async (req, res) => {
   }
 });
 
-// ── Donations / revenue ───────────────────────────────────────────────────
-
-// GET /api/v1/admin/donations — all donations + revenue summary
 router.get('/donations', requireAdmin, async (req, res) => {
   try {
     const limit = Math.min(300, Math.max(1, parseInt(req.query.limit) || 100));
@@ -502,9 +470,6 @@ router.get('/donations', requireAdmin, async (req, res) => {
   }
 });
 
-// ── Metadata for admin panel ───────────────────────────────────────────
-
-// GET /api/v1/admin/meta
 router.get('/meta', requireAdmin, (req, res) => {
   res.json({ ok: true, achievements: ALL_ACHIEVEMENTS, items: ITEM_DEFS_LIST });
 });

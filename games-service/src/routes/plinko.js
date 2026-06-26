@@ -5,7 +5,6 @@ import { BIG_WIN_THRESHOLD } from '../constants/index.js';
 
 const router = Router();
 
-// Multiplier tables — identical to frontend baseTables fallback
 const TABLES = {
   'LOW:8':    [3, 1.5, 1.1, 1.0, 0.7, 1.0, 1.1, 1.5, 3],
   'MEDIUM:8': [8, 2.0, 1.3, 0.7, 0.3, 0.7, 1.3, 2.0, 8],
@@ -31,7 +30,6 @@ function getTable(rows, difficulty) {
   return TABLES[`${String(difficulty).toUpperCase()}:${rows}`] ?? null;
 }
 
-// GET /api/v1/games/plinko/game/multipliers?rows=X&difficulty=Y
 router.get('/game/multipliers', (req, res) => {
   const rows       = parseInt(req.query.rows);
   const difficulty = String(req.query.difficulty || '').toUpperCase();
@@ -40,7 +38,6 @@ router.get('/game/multipliers', (req, res) => {
   res.json(table);
 });
 
-// POST /api/v1/games/plinko/game/play
 router.post('/game/play', requireAuth, async (req, res) => {
   const { bet, balls, rows, difficulty } = req.body;
 

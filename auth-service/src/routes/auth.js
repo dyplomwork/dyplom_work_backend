@@ -15,7 +15,6 @@ function makeToken(user) {
   );
 }
 
-// POST /api/v1/accounts/auth/register
 router.post('/auth/register', async (req, res) => {
   const { nickname, password } = req.body;
   if (!nickname || !password) {
@@ -38,7 +37,6 @@ router.post('/auth/register', async (req, res) => {
   }
 });
 
-// POST /api/v1/accounts/auth/login
 router.post('/auth/login', async (req, res) => {
   const { login, password } = req.body;
   if (!login || !password) {
@@ -63,12 +61,10 @@ router.post('/auth/login', async (req, res) => {
   }
 });
 
-// POST /api/v1/accounts/logout
 router.post('/logout', requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
-// GET /api/v1/accounts/users/me
 router.get('/users/me', requireAuth, async (req, res) => {
   try {
     const { rows } = await pool.query(`SELECT * FROM users WHERE id = $1`, [req.user.id]);
@@ -80,10 +76,8 @@ router.get('/users/me', requireAuth, async (req, res) => {
   }
 });
 
-// GET /api/v1/accounts/users/me/balance
 router.get('/users/me/balance', requireAuth, async (req, res) => {
   try {
-    // Also return role so client can react to admin role changes without re-login
     const { rows } = await pool.query(`SELECT balance, role, nickname FROM users WHERE id = $1`, [req.user.id]);
     if (!rows[0]) return res.status(404).json({ ok: false, error: 'User not found' });
     res.json({ ok: true, balance: parseFloat(rows[0].balance), role: rows[0].role, nickname: rows[0].nickname });
@@ -93,13 +87,11 @@ router.get('/users/me/balance', requireAuth, async (req, res) => {
   }
 });
 
-// POST /api/v1/accounts/auth/google — Google OAuth sign-in / sign-up
 router.post('/auth/google', async (req, res) => {
   const { idToken } = req.body;
   if (!idToken) return res.status(400).json({ ok: false, error: 'idToken required' });
 
   try {
-    // Verify Google ID token via Google's tokeninfo endpoint (no extra library needed)
     const gRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`);
     const payload = await gRes.json();
 
@@ -107,8 +99,6 @@ router.post('/auth/google', async (req, res) => {
       return res.status(401).json({ ok: false, error: 'Invalid Google token' });
     }
 
-    // Audience check is mandatory: without it, an ID token minted for ANY other
-    // Google app would be accepted here. Refuse to run sign-in if unconfigured.
     const clientId = process.env.GOOGLE_CLIENT_ID;
     if (!clientId) {
       console.error('[Google OAuth] GOOGLE_CLIENT_ID is not configured');
@@ -121,7 +111,6 @@ router.post('/auth/google', async (req, res) => {
     const googleSub = payload.sub;
     const rawName  = payload.name || payload.email?.split('@')[0] || `user${googleSub.slice(-6)}`;
 
-    // Find existing user by google_sub
     let { rows } = await pool.query(`SELECT * FROM users WHERE google_sub = $1`, [googleSub]);
     let user = rows[0];
 
@@ -130,7 +119,6 @@ router.post('/auth/google', async (req, res) => {
     }
 
     if (!user) {
-      // New Google user — generate a unique nickname
       let base = rawName.replace(/[^\w\-\.а-яА-ЯёЁіїєІЇЄ]/gu, '').slice(0, 40) || `g${googleSub.slice(-8)}`;
       const { rows: taken } = await pool.query(`SELECT id FROM users WHERE nickname = $1`, [base]);
       if (taken.length > 0) base = `${base}_${googleSub.slice(-4)}`;
@@ -141,7 +129,6 @@ router.post('/auth/google', async (req, res) => {
       );
       user = created[0];
     } else if (payload.picture && !user.avatar_url) {
-      // Existing Google user — update avatar if they don't have one yet
       const { rows: updated } = await pool.query(
         `UPDATE users SET avatar_url = $1 WHERE id = $2 RETURNING *`,
         [payload.picture, user.id]
@@ -156,7 +143,6 @@ router.post('/auth/google', async (req, res) => {
   }
 });
 
-// PATCH /api/v1/accounts/users/me — change nickname and/or avatar_url
 router.patch('/users/me', requireAuth, async (req, res) => {
   const { nickname, avatar_url } = req.body;
 
@@ -172,7 +158,6 @@ router.patch('/users/me', requireAuth, async (req, res) => {
   }
 
   if (avatar_url !== undefined) {
-    // null or empty string clears the avatar
     updates.push(`avatar_url = $${values.length + 1}`);
     values.push(avatar_url || null);
   }

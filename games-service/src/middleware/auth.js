@@ -1,8 +1,6 @@
 import jwt from 'jsonwebtoken';
 import pool from '../db.js';
 
-// Verifies the JWT, then checks live account state (exists / not banned /
-// token not invalidated) so a ban blocks gameplay immediately too.
 export async function requireAuth(req, res, next) {
   const header = req.headers.authorization;
   if (!header?.startsWith('Bearer ')) {
@@ -55,7 +53,6 @@ export async function getBalance(userId) {
   return parseFloat(rows[0]?.balance ?? 0);
 }
 
-// Track game statistics (fire-and-forget)
 export function recordStats(userId, gameType, wagered, won) {
   const biggestWin = won > 0 ? won : 0;
   pool.query(

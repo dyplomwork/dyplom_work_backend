@@ -1,12 +1,7 @@
-/**
- * Single source of truth for all achievement definitions.
- * Imported by both admin.js (for granting) and stats.js (for auto-award logic).
- */
 
 export const MYTHIC_IDS     = ['divine_relic', 'cosmos_gem'];
 export const LEGENDARY_IDS  = ['ancient_relic', 'void_artifact', 'phoenix_feather'];
 
-/** Full achievement definitions — include desc/descUa for profile display. */
 export const ALL_ACHIEVEMENTS = [
   { id: 'mythic_hunter',  icon: '✨', rarity: 'mythic',    name: 'Mythic Hunter',       nameUa: 'Мисливець за Mythic',  desc: 'Dropped a Mythic item',              descUa: 'Випав Mythic предмет' },
   { id: 'millionaire',    icon: '💰', rarity: 'legendary', name: 'Millionaire',         nameUa: 'Мільйонер',            desc: 'Won 1,000,000+ K in a single round', descUa: 'Виграли 1,000,000+ K за раунд' },
@@ -23,10 +18,8 @@ export const ALL_ACHIEVEMENTS = [
   { id: 'loyal',          icon: '❤️', rarity: 'rare',      name: 'Loyal Player',        nameUa: 'Лояльний гравець',     desc: 'Long-time community member',         descUa: 'Давній учасник спільноти' },
 ];
 
-/** Quick lookup map: id → definition */
 export const ACHIEVEMENT_MAP = Object.fromEntries(ALL_ACHIEVEMENTS.map(a => [a.id, a]));
 
-/** Returns definition or a safe fallback */
 export function getAchievement(id) {
   return ACHIEVEMENT_MAP[id] ?? { id, icon: '🏅', rarity: 'common', name: id, nameUa: id, desc: '', descUa: '' };
 }

@@ -5,7 +5,6 @@ import { MYTHIC_IDS, getAchievement } from '../constants/achievements.js';
 
 const router = Router();
 
-// GET /api/v1/stats/me
 router.get('/me', requireAuth, async (req, res) => {
   try {
     const [statsRes, balRes, clickerRes, itemsRes, mythicRes, manualAchRes] = await Promise.all([
@@ -46,10 +45,8 @@ router.get('/me', requireAuth, async (req, res) => {
     const autoPower   = Number(clicker?.auto_power  ?? 0);
     const balance     = parseFloat(balRes.rows[0]?.balance ?? 0);
 
-    // Manually granted achievements (by admin)
     const manualAchIds = new Set(manualAchRes.rows.map(r => r.achievement_id));
 
-    // Compute auto-earned achievement IDs based on current player stats
     const autoAchIds = new Set();
     if (mythicCount > 0)           autoAchIds.add('mythic_hunter');
     if (biggestWin >= 1_000_000)   autoAchIds.add('millionaire');
@@ -62,7 +59,6 @@ router.get('/me', requireAuth, async (req, res) => {
     if (balance >= 500_000)        autoAchIds.add('rich');
     if (totalWagered >= 1_000_000) autoAchIds.add('high_roller');
 
-    // Merge manual + auto; use getAchievement() as single source of truth for labels/icons
     const allAchIds = new Set([...manualAchIds, ...autoAchIds]);
     const achievements = [...allAchIds].map(id => ({
       ...getAchievement(id),

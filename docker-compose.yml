@@ -20,8 +20,6 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
 
-  # Secrets are read from a local .env file (see .env.example). The :- values are
-  # insecure DEV-ONLY defaults; production (Railway) must supply real env vars.
   auth-service:
     build: ./auth-service
     environment:

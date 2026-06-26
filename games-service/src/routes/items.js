@@ -22,12 +22,10 @@ function itemDto(row) {
   };
 }
 
-// GET /api/v1/items/defs — all item definitions
 router.get('/defs', (req, res) => {
   res.json(Object.values(ITEM_DEFS));
 });
 
-// GET /api/v1/items/me — user's inventory
 router.get('/me', requireAuth, async (req, res) => {
   try {
     const { rows } = await pool.query(
@@ -48,10 +46,8 @@ router.get('/me', requireAuth, async (req, res) => {
   }
 });
 
-// POST /api/v1/items/:itemId/sell-vendor — sell item to vendor at 50% base value
 router.post('/:itemId/sell-vendor', requireAuth, async (req, res) => {
   try {
-    // Check item exists and belongs to this user
     const { rows } = await pool.query(
       `SELECT i.* FROM items i
        LEFT JOIN auction_listings al ON al.item_id = i.id AND al.status = 'ACTIVE'
@@ -67,7 +63,6 @@ router.post('/:itemId/sell-vendor', requireAuth, async (req, res) => {
 
     if (sellPrice <= 0) return res.status(400).json({ ok: false, error: 'Item has no sell value' });
 
-    // Delete item and credit balance atomically
     await pool.query(`DELETE FROM items WHERE id = $1`, [item.id]);
     const newBalance = await addBalance(req.user.id, sellPrice);
 

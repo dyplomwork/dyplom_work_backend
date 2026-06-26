@@ -6,7 +6,6 @@ import { ITEM_DEFS } from '../itemDefs.js';
 const router = Router();
 
 export const UPGRADES = [
-  // ── Tier 1: Coin upgrades ──────────────────────────────────────────
   {
     id: 'click_c1', tier: 1, visual: null,
     name: 'Quick Fingers', nameUa: 'Швидкі пальці',
@@ -28,7 +27,6 @@ export const UPGRADES = [
     coinCost: 600, itemReq: null,
     clickBonus: 2, autoBonus: 0, maxLevel: 4,
   },
-  // ── Tier 2: Uncommon items ─────────────────────────────────────────
   {
     id: 'lucky_touch', tier: 2, visual: 'lucky',
     name: 'Lucky Touch', nameUa: 'Щасливий дотик',
@@ -64,7 +62,6 @@ export const UPGRADES = [
     coinCost: 0, itemReq: { itemDefId: 'iron_nugget', count: 2 },
     clickBonus: 4, autoBonus: 3, maxLevel: 3,
   },
-  // ── Tier 3: Rare items ─────────────────────────────────────────────
   {
     id: 'sapphire_strike', tier: 3, visual: 'sapphire',
     name: 'Sapphire Strike', nameUa: 'Сапфіровий удар',
@@ -93,7 +90,6 @@ export const UPGRADES = [
     coinCost: 0, itemReq: { itemDefId: 'golden_shield', count: 1 },
     clickBonus: 15, autoBonus: 8, maxLevel: 2,
   },
-  // ── Tier 4: Epic items ─────────────────────────────────────────────
   {
     id: 'void_power', tier: 4, visual: 'void',
     name: 'Void Power', nameUa: 'Сила порожнечі',
@@ -115,7 +111,6 @@ export const UPGRADES = [
     coinCost: 0, itemReq: { itemDefId: 'dragon_crystal', count: 1 },
     clickBonus: 30, autoBonus: 20, maxLevel: 1,
   },
-  // ── Tier 5: Legendary items ────────────────────────────────────────
   {
     id: 'phoenix_aura', tier: 5, visual: 'phoenix',
     name: 'Phoenix Aura', nameUa: 'Аура фенікса',
@@ -137,7 +132,6 @@ export const UPGRADES = [
     coinCost: 0, itemReq: { itemDefId: 'void_artifact', count: 1 },
     clickBonus: 60, autoBonus: 80, maxLevel: 1,
   },
-  // ── Tier 6: Mythic items ───────────────────────────────────────────
   {
     id: 'cosmos_skin', tier: 6, visual: 'cosmos',
     name: 'Cosmic Coin', nameUa: 'Космічна монета',
@@ -185,7 +179,6 @@ async function getSpecificItems(userId, itemDefId, limit) {
   return rows.map(r => r.id);
 }
 
-// GET /api/v1/clicker
 router.get('/', requireAuth, async (req, res) => {
   try {
     const raw = await getOrCreateState(req.user.id);
@@ -208,7 +201,6 @@ router.get('/', requireAuth, async (req, res) => {
   }
 });
 
-// POST /api/v1/clicker/click — batched
 router.post('/click', requireAuth, async (req, res) => {
   const clicks = Math.min(200, Math.max(1, parseInt(req.body.clicks) || 1));
   try {
@@ -224,7 +216,6 @@ router.post('/click', requireAuth, async (req, res) => {
   }
 });
 
-// POST /api/v1/clicker/upgrade
 router.post('/upgrade', requireAuth, async (req, res) => {
   const { upgradeId } = req.body;
   const upgradeDef = UPGRADES.find(u => u.id === upgradeId);
@@ -283,7 +274,6 @@ router.post('/upgrade', requireAuth, async (req, res) => {
   }
 });
 
-// POST /api/v1/clicker/convert
 router.post('/convert', requireAuth, async (req, res) => {
   try {
     const raw = await getOrCreateState(req.user.id);

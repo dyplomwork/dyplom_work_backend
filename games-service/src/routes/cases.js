@@ -82,19 +82,17 @@ function caseToDto(c) {
         icon: def?.icon ?? '📦',
         color: def?.color ?? '#fff',
         value: def?.value ?? 0,
-        chance: parseFloat((i.chance * 100).toFixed(4)), // send as percentage (game.ts divides by 100)
+        chance: parseFloat((i.chance * 100).toFixed(4)),
         prize: def?.value ?? 0,
       };
     }),
   };
 }
 
-// GET /api/v1/games/cases
 router.get('/', (req, res) => {
   res.json(Object.values(CASES).map(caseToDto));
 });
 
-// GET /api/v1/games/cases/:id
 router.get('/:id', (req, res) => {
   if (req.params.id === 'game') return res.status(404).json({ ok: false, error: 'Not found' });
   const c = CASES[req.params.id];
@@ -102,7 +100,6 @@ router.get('/:id', (req, res) => {
   res.json(caseToDto(c));
 });
 
-// POST /api/v1/games/cases/game/play
 router.post('/game/play', requireAuth, async (req, res) => {
   const { type } = req.body;
   const c = CASES[type];
@@ -118,7 +115,6 @@ router.post('/game/play', requireAuth, async (req, res) => {
   const def = ITEM_DEFS[rolled.itemDefId];
   const payout = def?.value ?? 0;
 
-  // Save item to user inventory
   const { rows: itemRows } = await pool.query(
     `INSERT INTO items (user_id, item_def_id, source) VALUES ($1, $2, 'case') RETURNING id`,
     [req.user.id, rolled.itemDefId]
@@ -127,7 +123,6 @@ router.post('/game/play', requireAuth, async (req, res) => {
 
   recordStats(req.user.id, 'cases', c.price, payout);
 
-  // Broadcast to drops ticker
   pushDrop({
     nick: req.user.nickname,
     caseId: type,

@@ -4,7 +4,6 @@ import { requireAuth, deductBalance, addBalance } from '../middleware/auth.js';
 
 const router = Router();
 
-// Statuses where balance is already settled — no more refunds
 const TERMINAL_STATUSES = new Set(['FINISHED', 'CANCELLED', 'ABANDONED']);
 
 const sseClients = new Map();
@@ -60,7 +59,6 @@ async function tryStartCountdown(battleId) {
 
   setTimeout(async () => {
     const battle = await getBattle(battleId);
-    // Only resolve if still in COUNTDOWN — prevents double-payout on concurrent requests
     if (!battle || battle.status !== 'COUNTDOWN') return;
 
     const resultSide = Math.random() < 0.5 ? 'heads' : 'tails';
@@ -77,14 +75,13 @@ async function tryStartCountdown(battleId) {
        WHERE id = $3 AND status = 'COUNTDOWN' RETURNING *`,
       [resultSide, winnerId, battleId]
     );
-    if (!finished[0]) return; // already resolved by another process
+    if (!finished[0]) return;
 
     await addBalance(winnerId, parseFloat(battle.amount) * 2);
     emitBattle(battleId, battleDto(finished[0]));
   }, 3000);
 }
 
-// GET /api/v1/battles/history — finished battles (for admin history tab)
 router.get('/history', requireAuth, async (req, res) => {
   try {
     const limit = Math.min(Number(req.query.limit) || 100, 500);
@@ -100,7 +97,6 @@ router.get('/history', requireAuth, async (req, res) => {
   }
 });
 
-// GET /api/v1/battles
 router.get('/', requireAuth, async (req, res) => {
   const { rows } = await pool.query(
     `SELECT * FROM battles WHERE status NOT IN ('FINISHED','CANCELLED','ABANDONED')
@@ -109,7 +105,6 @@ router.get('/', requireAuth, async (req, res) => {
   res.json(rows.map(battleDto));
 });
 
-// POST /api/v1/battles
 router.post('/', requireAuth, async (req, res) => {
   const amount = Number(req.body.amount);
   const side = req.body.side ?? null;
@@ -132,14 +127,12 @@ router.post('/', requireAuth, async (req, res) => {
   res.status(201).json(battleDto(rows[0]));
 });
 
-// GET /api/v1/battles/:id
 router.get('/:id', requireAuth, async (req, res) => {
   const row = await getBattle(req.params.id);
   if (!row) return res.status(404).json({ ok: false, error: 'Battle not found' });
   res.json(battleDto(row));
 });
 
-// POST /api/v1/battles/:id/join
 router.post('/:id/join', requireAuth, async (req, res) => {
   const row = await getBattle(req.params.id);
   if (!row) return res.status(404).json({ ok: false, error: 'Battle not found' });
@@ -167,7 +160,6 @@ router.post('/:id/join', requireAuth, async (req, res) => {
     [req.user.id, req.user.nickname, joinerSide, req.params.id]
   );
 
-  // Race condition: another user joined first — refund and reject
   if (!rows[0]) {
     await addBalance(req.user.id, amount);
     return res.status(409).json({ ok: false, error: 'Battle no longer available' });
@@ -178,7 +170,6 @@ router.post('/:id/join', requireAuth, async (req, res) => {
   res.json(dto);
 });
 
-// POST /api/v1/battles/:id/ready
 router.post('/:id/ready', requireAuth, async (req, res) => {
   const row = await getBattle(req.params.id);
   if (!row) return res.status(404).json({ ok: false, error: 'Battle not found' });
@@ -202,12 +193,10 @@ router.post('/:id/ready', requireAuth, async (req, res) => {
   res.json(battleDto(updated));
 });
 
-// POST /api/v1/battles/:id/leave
 router.post('/:id/leave', requireAuth, async (req, res) => {
   const row = await getBattle(req.params.id);
   if (!row) return res.status(404).json({ ok: false, error: 'Battle not found' });
 
-  // Block leave during/after resolution — balance already settled
   if (TERMINAL_STATUSES.has(row.status) || row.status === 'COUNTDOWN') {
     return res.status(400).json({ ok: false, error: 'Cannot leave at this stage' });
   }
@@ -229,7 +218,6 @@ router.post('/:id/leave', requireAuth, async (req, res) => {
     return res.json(battleDto(rows[0]));
   }
 
-  // Creator leaves — refund joiner if any, cancel
   if (row.joiner_id) await addBalance(row.joiner_id, parseFloat(row.amount));
   const { rows } = await pool.query(
     `UPDATE battles SET status = 'CANCELLED', updated_at = NOW() WHERE id = $1 RETURNING *`,
@@ -239,7 +227,6 @@ router.post('/:id/leave', requireAuth, async (req, res) => {
   res.json(battleDto(rows[0]));
 });
 
-// DELETE /api/v1/battles/:id
 router.delete('/:id', requireAuth, async (req, res) => {
   const row = await getBattle(req.params.id);
   if (!row) return res.status(404).json({ ok: false, error: 'Battle not found' });
@@ -253,7 +240,6 @@ router.delete('/:id', requireAuth, async (req, res) => {
   res.status(204).end();
 });
 
-// GET /api/v1/battles/:id/events — SSE (no auth: EventSource cannot send headers)
 router.get('/:id/events', (req, res) => {
   const { id } = req.params;
 

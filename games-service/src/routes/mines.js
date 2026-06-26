@@ -32,7 +32,6 @@ function buildField(minePositions) {
   return { field };
 }
 
-// GET /api/v1/games/mines/game/multiplier?opened=X&mines=Y
 router.get('/game/multiplier', (req, res) => {
   const opened = parseInt(req.query.opened);
   const mines  = parseInt(req.query.mines);
@@ -42,7 +41,6 @@ router.get('/game/multiplier', (req, res) => {
   res.json(calcMultiplier(opened, mines));
 });
 
-// GET /api/v1/games/mines/game
 router.get('/game', requireAuth, async (req, res) => {
   const { rows } = await pool.query(
     `SELECT * FROM mines_sessions WHERE user_id = $1 AND status = 'ACTIVE'`,
@@ -53,7 +51,6 @@ router.get('/game', requireAuth, async (req, res) => {
   res.json({ ok: true, bet: parseFloat(s.bet), minesCount: s.mines_count, opened: s.opened });
 });
 
-// POST /api/v1/games/mines/game/start
 router.post('/game/start', requireAuth, async (req, res) => {
   const bet   = Number(req.body.bet);
   const mines = parseInt(req.body.mines);
@@ -80,7 +77,6 @@ router.post('/game/start', requireAuth, async (req, res) => {
   res.status(201).json({ ok: true });
 });
 
-// POST /api/v1/games/mines/game/step
 router.post('/game/step', requireAuth, async (req, res) => {
   const row = parseInt(req.body.row);
   const col = parseInt(req.body.col);
@@ -103,7 +99,6 @@ router.post('/game/step', requireAuth, async (req, res) => {
 
   const isMine = session.mine_positions.some(p => p.row === row && p.col === col);
   if (isMine) {
-    // Record loss — player loses full bet, wins 0
     recordStats(req.user.id, 'mines', parseFloat(session.bet), 0);
     await pool.query(`UPDATE mines_sessions SET status = 'FINISHED' WHERE id = $1`, [session.id]);
     return res.json({ finish: true, field: buildField(session.mine_positions) });
@@ -119,7 +114,6 @@ router.post('/game/step', requireAuth, async (req, res) => {
   res.json({ finish: false, nextMultiplier });
 });
 
-// POST /api/v1/games/mines/game/finish — cash out
 router.post('/game/finish', requireAuth, async (req, res) => {
   const { rows } = await pool.query(
     `SELECT * FROM mines_sessions WHERE user_id = $1 AND status = 'ACTIVE'`,

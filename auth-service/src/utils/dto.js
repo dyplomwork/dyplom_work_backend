@@ -1,9 +1,4 @@
-/**
- * Data Transfer Object helpers for auth-service.
- * Single source of truth — imported by auth.js and admin.js.
- */
 
-/** Public user DTO — returned to the client after login/register */
 export function userDto(row) {
   return {
     id:         row.id,
@@ -14,7 +9,6 @@ export function userDto(row) {
   };
 }
 
-/** Extended user DTO — used in admin panel (includes discord, status, createdAt) */
 export function adminUserDto(row) {
   return {
     id:         row.id,

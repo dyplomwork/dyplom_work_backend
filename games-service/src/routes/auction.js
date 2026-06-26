@@ -28,7 +28,6 @@ function listingDto(row) {
   };
 }
 
-// GET /api/v1/auction — list active listings
 router.get('/', async (req, res) => {
   try {
     const { rows } = await pool.query(
@@ -41,7 +40,6 @@ router.get('/', async (req, res) => {
   }
 });
 
-// POST /api/v1/auction — list an item
 router.post('/', requireAuth, async (req, res) => {
   const { itemId, price } = req.body;
   const p = Number(price);
@@ -51,7 +49,6 @@ router.post('/', requireAuth, async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    // Verify item belongs to user and is not already listed
     const { rows: itemRows } = await client.query(
       `SELECT i.* FROM items i
        LEFT JOIN auction_listings al ON al.item_id = i.id AND al.status = 'ACTIVE'
@@ -79,7 +76,6 @@ router.post('/', requireAuth, async (req, res) => {
   }
 });
 
-// DELETE /api/v1/auction/:id — delist
 router.delete('/:id', requireAuth, async (req, res) => {
   try {
     const { rows } = await pool.query(
@@ -95,7 +91,6 @@ router.delete('/:id', requireAuth, async (req, res) => {
   }
 });
 
-// POST /api/v1/auction/:id/buy
 router.post('/:id/buy', requireAuth, async (req, res) => {
   const client = await pool.connect();
   try {
@@ -115,7 +110,6 @@ router.post('/:id/buy', requireAuth, async (req, res) => {
     }
 
     const price = parseFloat(listing.price);
-    // Deduct from buyer
     const { rows: balRows } = await client.query(
       `UPDATE users SET balance = balance - $1 WHERE id = $2 AND balance >= $1 RETURNING balance`,
       [price, req.user.id]
@@ -125,20 +119,17 @@ router.post('/:id/buy', requireAuth, async (req, res) => {
       return res.status(400).json({ ok: false, error: 'Insufficient balance' });
     }
 
-    // Pay seller (95% — 5% marketplace fee)
     const sellerPayout = parseFloat((price * 0.95).toFixed(2));
     await client.query(
       `UPDATE users SET balance = balance + $1 WHERE id = $2`,
       [sellerPayout, listing.seller_id]
     );
 
-    // Transfer item to buyer
     await client.query(
       `UPDATE items SET user_id = $1 WHERE id = $2`,
       [req.user.id, listing.item_id]
     );
 
-    // Close listing
     await client.query(
       `UPDATE auction_listings SET status = 'SOLD', buyer_id = $1, buyer_nick = $2, sold_at = NOW()
        WHERE id = $3`,

@@ -7,8 +7,6 @@ import statsRouter from './routes/stats.js';
 import donationsRouter from './routes/donations.js';
 import pool from './db.js';
 
-// Fail fast if the JWT signing secret is missing — never run with an undefined
-// secret (jwt.sign would throw per-request and tokens could not be verified).
 if (!process.env.JWT_SECRET) {
   console.error('FATAL: JWT_SECRET environment variable is required');
   process.exit(1);
@@ -22,7 +20,6 @@ app.use('/api/v1/admin', adminRouter);
 app.use('/api/v1/stats', statsRouter);
 app.use('/api/v1/donations', donationsRouter);
 
-// GET /api/me — alias
 app.get('/api/me', requireAuth, async (req, res) => {
   try {
     const { rows } = await pool.query(`SELECT * FROM users WHERE id = $1`, [req.user.id]);

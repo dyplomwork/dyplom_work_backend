@@ -5,12 +5,6 @@ import { requireAuth } from '../middleware/auth.js';
 
 const router = Router();
 
-/**
- * Coin packages — single source of truth on the server.
- * The client never sends the amount of coins; it sends only a packageId,
- * so a user cannot request an arbitrary credit. `coins` is the amount of
- * virtual currency (K) added to the balance; priceUsd is the Google Pay price.
- */
 export const PACKAGES = [
   { id: 'mini',  priceUsd: 1.99,  coins: 50000,   bonusPct: 0   },
   { id: 'basic', priceUsd: 4.99,  coins: 150000,  bonusPct: 20  },
@@ -32,25 +26,19 @@ function donationDto(row) {
   };
 }
 
-// GET /api/v1/donations/packages — public catalogue of coin packages
 router.get('/packages', (req, res) => {
   res.json({ ok: true, packages: PACKAGES });
 });
 
-// POST /api/v1/donations/checkout — confirm a Google Pay payment and credit coins
 router.post('/checkout', requireAuth, async (req, res) => {
   const { packageId, paymentToken, idempotencyKey } = req.body;
 
   const pkg = PACKAGE_MAP[packageId];
   if (!pkg) return res.status(400).json({ ok: false, error: 'Unknown package' });
 
-  // The Google Pay token proves a completed payment flow. We never store it raw —
-  // only a hash, for audit.
   if (typeof paymentToken !== 'string' || paymentToken.trim().length < 10) {
     return res.status(400).json({ ok: false, error: 'Invalid payment token' });
   }
-  // Client-supplied idempotency key (unique per purchase, reused on retry) — the
-  // same key cannot credit coins twice, even if the request is replayed.
   if (typeof idempotencyKey !== 'string' || idempotencyKey.trim().length < 8) {
     return res.status(400).json({ ok: false, error: 'Invalid idempotency key' });
   }
@@ -68,7 +56,6 @@ router.post('/checkout', requireAuth, async (req, res) => {
       [req.user.id, pkg.id, pkg.priceUsd, pkg.coins, idempotencyKey.trim(), tokenHash]
     );
 
-    // Duplicate key — this payment was already processed. Do not credit again.
     if (!ins.rows[0]) {
       await client.query('ROLLBACK');
       const { rows } = await pool.query(`SELECT balance FROM users WHERE id = $1`, [req.user.id]);
@@ -97,7 +84,6 @@ router.post('/checkout', requireAuth, async (req, res) => {
   }
 });
 
-// GET /api/v1/donations/me — current user's donation history
 router.get('/me', requireAuth, async (req, res) => {
   try {
     const { rows } = await pool.query(
